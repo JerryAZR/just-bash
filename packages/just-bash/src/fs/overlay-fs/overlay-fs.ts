@@ -188,7 +188,7 @@ export class OverlayFs implements IFileSystem {
    * Create a virtual directory in memory (sync, for initialization)
    */
   mkdirSync(path: string, _options?: MkdirOptions): void {
-    this.tree.ensureDirs(normalizePath(path));
+    this.tree.ensureDirs(normalizePath(path), (p) => this.lowerChildren(p));
   }
 
   /**
@@ -308,9 +308,25 @@ export class OverlayFs implements IFileSystem {
   private ensureParentDirs(path: string): void {
     const dir = dirname(path);
     if (dir === "/") return;
-    // Creates missing ancestors and resurrects whiteouted ones as
-    // transparent directories (write-under-deleted-dir semantics).
-    this.tree.ensureDirs(dir);
+    // Creates missing ancestors and resurrects whiteouted ones, marking
+    // their deleted lower-layer children with fresh whiteouts.
+    this.tree.ensureDirs(dir, (p) => this.lowerChildren(p));
+  }
+
+  /**
+   * List the lower-layer (real-FS) child names of a directory, for
+   * whiteout population during resurrection. Returns null when the path
+   * has no readable lower directory — lookups then degrade to individual
+   * lower-layer errors rather than leaking.
+   */
+  private lowerChildren(virtualPath: string): string[] | null {
+    const canonical = this.resolveRealPath_(this.toRealPath(virtualPath));
+    if (!canonical) return null;
+    try {
+      return fs.readdirSync(canonical);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -775,13 +791,10 @@ export class OverlayFs implements IFileSystem {
       }
     }
 
-    this.ensureParentDirs(normalized);
-    this.tree.attach(normalized, {
-      type: "directory",
-      children: new Map(),
-      mode: DEFAULT_DIR_MODE,
-      mtime: new Date(),
-    });
+    // ensureDirs creates the directory and any (already validated) parent
+    // shadows, and resurrects a whiteout at this path with lower-layer
+    // whiteouts populated — a plain attach would lose the deletion records.
+    this.tree.ensureDirs(normalized, (p) => this.lowerChildren(p));
   }
 
   /**
@@ -803,7 +816,6 @@ export class OverlayFs implements IFileSystem {
       throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
     }
     let dirNode: OverlayDirNode | undefined;
-    let hidesLower = false;
     if (result.kind === "found") {
       const node = result.node;
       if (node.type === "whiteout") {
@@ -813,10 +825,6 @@ export class OverlayFs implements IFileSystem {
         throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
       }
       dirNode = node;
-      // An opaque directory — here or anywhere above it — hides all
-      // lower-layer entries, so the real-FS merge below is skipped.
-      hidesLower =
-        node.opaque === true || result.stack.some((d) => d.opaque === true);
       // Add entries from the upper layer (with type info); whiteout
       // children hide same-named lower-layer entries below.
       for (const [name, child] of node.children) {
@@ -831,11 +839,6 @@ export class OverlayFs implements IFileSystem {
           isSymbolicLink: child.type === "symlink",
         });
       }
-    }
-
-    // Opaque directories hide the entire lower layer beneath them.
-    if (hidesLower) {
-      return entriesMap;
     }
 
     // Add entries from real filesystem with file types.
@@ -1113,8 +1116,8 @@ export class OverlayFs implements IFileSystem {
   }
 
   private scanRealFs(virtualDir: string, paths: Set<string>): void {
-    // Skip directories whose lower layer is hidden: a whiteout or opaque
-    // directory at or above them, or a non-directory shadow in the way.
+    // Skip directories whose lower layer is hidden: a whiteout at or
+    // above them, or a non-directory shadow in the way.
     if (this.lowerHidden(virtualDir)) return;
 
     // Use the canonical path for I/O to close the TOCTOU gap.
@@ -1142,7 +1145,7 @@ export class OverlayFs implements IFileSystem {
     }
   }
 
-  /** True when a whiteout (or opaque ancestry) hides `virtualPath`. */
+  /** True when a whiteout hides `virtualPath` at or above it. */
   private whiteoutBlocked(virtualPath: string): boolean {
     const result = this.tree.descend(virtualPath);
     return (
@@ -1152,9 +1155,9 @@ export class OverlayFs implements IFileSystem {
   }
 
   /**
-   * True when the lower layer at `virtualPath` is invisible: a whiteout or
-   * opaque directory at or above the path, or a non-directory shadow in
-   * the way. Missing paths (clean fall-through) return false.
+   * True when the lower layer at `virtualPath` is invisible: a whiteout at
+   * or above the path, or a non-directory shadow in the way. Missing paths
+   * (clean fall-through) return false.
    */
   private lowerHidden(virtualPath: string): boolean {
     const result = this.tree.descend(virtualPath);
@@ -1162,13 +1165,9 @@ export class OverlayFs implements IFileSystem {
       case "blocked":
       case "notdir":
         return true;
-      case "found": {
-        const node = result.node;
-        if (node.type !== "directory") return true;
-        return (
-          node.opaque === true || result.stack.some((d) => d.opaque === true)
-        );
-      }
+      case "found":
+        // Whiteouts mark deletions; file/symlink shadows are total.
+        return result.node.type !== "directory";
       default:
         return false;
     }
@@ -1373,7 +1372,7 @@ export class OverlayFs implements IFileSystem {
           );
         }
 
-        // Check if hidden by a whiteout (or opaque ancestry)
+        // Check if hidden by a whiteout
         if (this.whiteoutBlocked(resolved)) {
           throw new Error(
             `ENOENT: no such file or directory, realpath '${path}'`,
