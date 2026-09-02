@@ -193,4 +193,52 @@ describe("OverlayTree", () => {
     expect(tree.root.children.size).toBe(0);
     expect(tree.descend("/f")).toMatchObject({ kind: "missing" });
   });
+
+  describe("opaque directories", () => {
+    it("blocks missing descendants of resurrected directories", () => {
+      const tree = new OverlayTree(1024);
+      tree.putWhiteout("/a");
+      tree.ensureDirs("/a");
+      // Resurrected /a is opaque: lower-layer children stay hidden.
+      expect(tree.descend("/a/old.txt")).toMatchObject({ kind: "blocked" });
+      expect(tree.descend("/a/deep/nested")).toMatchObject({
+        kind: "blocked",
+      });
+      // But upper-layer children are found normally.
+      tree.attach("/a/new.txt", fileNode("n"));
+      expect(tree.descend("/a/new.txt")).toMatchObject({ kind: "found" });
+    });
+
+    it("marks directories attached over a whiteout as opaque", () => {
+      const tree = new OverlayTree(1024);
+      tree.putWhiteout("/d");
+      tree.attach("/d", dirNode());
+      const d = tree.descend("/d");
+      if (d.kind === "found" && d.node.type === "directory") {
+        expect(d.node.opaque).toBe(true);
+      } else {
+        throw new Error("unreachable");
+      }
+      expect(tree.descend("/d/old")).toMatchObject({ kind: "blocked" });
+    });
+
+    it("hides lower content below dirs created under an opaque parent", () => {
+      const tree = new OverlayTree(1024);
+      tree.putWhiteout("/a");
+      tree.ensureDirs("/a/b");
+      // /a/b was created fresh, but its lower-layer namesakes stay hidden
+      // because the opaque parent already hides all of /a/*.
+      expect(tree.descend("/a/b/lower.txt")).toMatchObject({
+        kind: "blocked",
+      });
+    });
+
+    it("does not affect never-deleted directories", () => {
+      const tree = new OverlayTree(1024);
+      tree.ensureDirs("/plain");
+      expect(tree.descend("/plain/anything")).toMatchObject({
+        kind: "missing",
+      });
+    });
+  });
 });

@@ -37,6 +37,15 @@ export interface OverlayDirNode {
   type: "directory";
   /** Child nodes keyed by name segment, in insertion order. */
   children: Map<string, OverlayNode>;
+  /**
+   * When true, the directory hides the entire lower layer beneath it:
+   * lookups for missing children are blocked (ENOENT), never fall through
+   * to disk, and readdir lists only upper-layer children. Set when a
+   * directory is resurrected from a whiteout — recreating a deleted
+   * directory does not bring back its old lower-layer contents (rm -rf
+   * semantics, and Linux overlayfs opaque dirs).
+   */
+  opaque?: boolean;
   mode: number;
   mtime: Date;
   identity?: string;
@@ -127,10 +136,15 @@ export class OverlayTree {
     const segments = splitPath(path);
     const stack: OverlayDirNode[] = [this.rootNode];
     let current = this.rootNode;
+    // Once an opaque directory is on the ancestry, everything below it
+    // that is not in the tree is hidden — reported as blocked.
+    let hidden = current.opaque === true;
     for (let i = 0; i < segments.length; i++) {
       const child = current.children.get(segments[i]);
       if (child === undefined) {
-        return { kind: "missing", stack, missingAt: i };
+        return hidden
+          ? { kind: "blocked", stack, blockedAt: i }
+          : { kind: "missing", stack, missingAt: i };
       }
       if (i === segments.length - 1) {
         return { kind: "found", stack, node: child };
@@ -143,6 +157,7 @@ export class OverlayTree {
       }
       stack.push(child);
       current = child;
+      if (child.opaque) hidden = true;
     }
     // The path is "/" itself: no ancestry, node is the root.
     return { kind: "found", stack: [], node: this.rootNode };
@@ -158,8 +173,14 @@ export class OverlayTree {
     let current = this.rootNode;
     for (const segment of splitPath(path)) {
       let child = current.children.get(segment);
-      if (child === undefined || child.type === "whiteout") {
+      if (child === undefined) {
         child = freshDirNode();
+        current.children.set(segment, child);
+      } else if (child.type === "whiteout") {
+        // Resurrection: the recreated directory is opaque — the whiteout
+        // deleted the lower-layer subtree, and recreating the directory
+        // does not bring its old contents back.
+        child = { ...freshDirNode(), opaque: true };
         current.children.set(segment, child);
       } else if (child.type !== "directory") {
         throw new Error(`ENOTDIR: not a directory, mkdir '${path}'`);
@@ -198,6 +219,11 @@ export class OverlayTree {
       throw new Error(
         `EEXIST: cannot replace ${current.type} with directory, attach '${path}'`,
       );
+    }
+    if (current?.type === "whiteout" && node.type === "directory") {
+      // A directory replacing a whiteout is opaque: the whiteout deleted
+      // the lower-layer subtree, and recreation does not restore it.
+      node.opaque = true;
     }
     // The rules above never let attach() replace a non-empty directory, so
     // only single-node byte costs matter here; subtree release is detach().
@@ -343,8 +369,11 @@ export class OverlayTree {
     path: string,
   ): OverlayDirNode {
     let child = parent.children.get(name);
-    if (child === undefined || child.type === "whiteout") {
+    if (child === undefined) {
       child = freshDirNode();
+      parent.children.set(name, child);
+    } else if (child.type === "whiteout") {
+      child = { ...freshDirNode(), opaque: true };
       parent.children.set(name, child);
     } else if (child.type !== "directory") {
       throw new Error(`ENOTDIR: not a directory, rm '${path}'`);
