@@ -26,6 +26,17 @@ import { DEFAULT_DIR_MODE } from "../path-utils.js";
 export interface OverlayFileNode {
   type: "file";
   content: Uint8Array;
+  /**
+   * Metacopy marker (Linux overlayfs metacopy semantics): metadata
+   * (mode/mtime) is upper-layer, data is still lower-layer. Created by
+   * chmod/utimes copy-up so metadata-only changes cost O(1) instead of a
+   * full content copy. Reads fall through to the lower file (or promote
+   * to a full node on Windows, where metadata is advisory); the first
+   * content write completes the copy-up, preserving the upper mode.
+   */
+  metacopy?: boolean;
+  /** Lower-layer file size recorded at metacopy creation (for stat). */
+  lowerSize?: number;
   /** Append segments retained without copying the complete file per append. */
   appendChunks?: Uint8Array[];
   mode: number;

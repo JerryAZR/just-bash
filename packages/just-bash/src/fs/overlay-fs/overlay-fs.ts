@@ -413,11 +413,45 @@ export class OverlayFs implements IFileSystem {
           `EISDIR: illegal operation on a directory, read '${path}'`,
         );
       }
-      return this.coalesceFileContent(memEntry, path);
+      if (!memEntry.metacopy) {
+        return this.coalesceFileContent(memEntry, path);
+      }
+      // Metacopy: data still lives in the lower layer. POSIX serves
+      // fall-through reads (metadata is worth the laziness); Windows
+      // promotes on first read (metadata is advisory there, so data
+      // residency is the only value worth paying for).
+      const data = await this.readLowerFileBytes(normalized, path, seen);
+      if (process.platform === "win32") {
+        try {
+          this.tree.attach(normalized, {
+            type: "file",
+            content: data,
+            mode: memEntry.mode,
+            mtime: memEntry.mtime,
+          });
+        } catch {
+          // Promotion is an optimization (and can hit the memory quota);
+          // fall-through reads remain correct.
+        }
+      }
+      return data;
     }
 
-    // Fall back to real filesystem.  Use the canonical path for I/O to
-    // close the TOCTOU gap between validation and use.
+    return this.readLowerFileBytes(normalized, path, seen);
+  }
+
+  /**
+   * Read a path from the lower layer (real filesystem), following lower
+   * symlinks through the virtual layer. Shared by clean-miss reads and
+   * metacopy fall-through.
+   */
+  private async readLowerFileBytes(
+    normalized: string,
+    path: string,
+    seen: Set<string>,
+  ): Promise<Uint8Array> {
+    // Use the canonical path for I/O to close the TOCTOU gap between
+    // validation and use.
     const canonical = this.resolveRealPath_(this.toRealPath(normalized));
     if (!canonical) {
       throw new Error(`ENOENT: no such file or directory, open '${path}'`);
@@ -565,8 +599,22 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "found" && result.node.type === "file") {
-      this.tree.appendChunk(result.node, newBuffer);
-      result.node.mtime = new Date();
+      const node = result.node;
+      if (node.metacopy) {
+        // Complete the copy-up: lower data + append chunk, preserving the
+        // metacopy node's mode.
+        const base = await this.readLowerFileBytes(normalized, path, new Set());
+        this.tree.attach(normalized, {
+          type: "file",
+          content: base,
+          appendChunks: [newBuffer],
+          mode: node.mode,
+          mtime: new Date(),
+        });
+        return;
+      }
+      this.tree.appendChunk(node, newBuffer);
+      node.mtime = new Date();
       return;
     }
     if (result.kind === "blocked") {
@@ -744,12 +792,13 @@ export class OverlayFs implements IFileSystem {
 
     let size = 0;
     if (entry.type === "file") {
-      size =
-        entry.content.byteLength +
-        (entry.appendChunks?.reduce(
-          (sum, chunk) => sum + chunk.byteLength,
-          0,
-        ) ?? 0);
+      size = entry.metacopy
+        ? (entry.lowerSize ?? 0)
+        : entry.content.byteLength +
+          (entry.appendChunks?.reduce(
+            (sum, chunk) => sum + chunk.byteLength,
+            0,
+          ) ?? 0);
     }
 
     return {
@@ -1230,16 +1279,19 @@ export class OverlayFs implements IFileSystem {
       return;
     }
 
-    // If from real fs, we need to copy to the upper layer first
+    // If from real fs, attach a metacopy node: metadata moves to the
+    // upper layer, data stays lower (copied lazily on first content
+    // write). chmod changes ctime, not mtime — preserve the lower mtime.
     const stat = await this.stat(normalized);
     this.ensureParentDirs(normalized);
     if (stat.isFile) {
-      const content = await this.readFileBuffer(normalized);
       this.tree.attach(normalized, {
         type: "file",
-        content,
+        content: new Uint8Array(0),
+        metacopy: true,
+        lowerSize: stat.size,
         mode,
-        mtime: new Date(),
+        mtime: stat.mtime,
       });
     } else if (stat.isDirectory) {
       this.tree.attach(normalized, {
@@ -1541,14 +1593,16 @@ export class OverlayFs implements IFileSystem {
       return;
     }
 
-    // If from real fs, we need to copy to the upper layer first
+    // If from real fs, attach a metacopy node: metadata moves up, data
+    // stays lower until the first content write.
     const stat = await this.stat(normalized);
     this.ensureParentDirs(normalized);
     if (stat.isFile) {
-      const content = await this.readFileBuffer(normalized);
       this.tree.attach(normalized, {
         type: "file",
-        content,
+        content: new Uint8Array(0),
+        metacopy: true,
+        lowerSize: stat.size,
         mode: stat.mode,
         mtime,
       });
