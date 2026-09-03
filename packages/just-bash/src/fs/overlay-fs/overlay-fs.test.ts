@@ -932,4 +932,71 @@ describe("OverlayFs", () => {
       expect(namesFromWithTypes).toEqual(namesFromReaddir);
     });
   });
+
+  describe("mode inheritance on copy-up", () => {
+    // Lower-layer mode inheritance is POSIX-only: Windows modes are
+    // synthesized (read-only attribute, exec bits from extension) and
+    // nothing in the overlay enforces them, so the stat is skipped there.
+    const posixIt = process.platform === "win32" ? it.skip : it;
+
+    posixIt(
+      "preserves the lower file's mode when writeFile shadows it",
+      async () => {
+        const filePath = path.join(tempDir, "script.sh");
+        fs.writeFileSync(filePath, "#!/bin/sh\n");
+        fs.chmodSync(filePath, 0o750);
+        const diskMode = fs.statSync(filePath).mode;
+
+        const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+        await overlay.writeFile("/script.sh", "#!/bin/sh\nexit 0\n");
+
+        expect((await overlay.stat("/script.sh")).mode).toBe(diskMode);
+        expect(await overlay.readFile("/script.sh")).toBe(
+          "#!/bin/sh\nexit 0\n",
+        );
+      },
+    );
+
+    it("preserves an upper-layer chmod across writeFile overwrite", async () => {
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+      await overlay.writeFile("/run.sh", "v1");
+      await overlay.chmod("/run.sh", 0o755);
+      await overlay.writeFile("/run.sh", "v2");
+
+      expect((await overlay.stat("/run.sh")).mode).toBe(0o755);
+      expect(await overlay.readFile("/run.sh")).toBe("v2");
+    });
+
+    posixIt(
+      "preserves the lower file's mode on appendFile copy-up",
+      async () => {
+        const filePath = path.join(tempDir, "data.txt");
+        fs.writeFileSync(filePath, "a");
+        fs.chmodSync(filePath, 0o640);
+        const diskMode = fs.statSync(filePath).mode;
+
+        const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+        await overlay.appendFile("/data.txt", "b");
+
+        expect((await overlay.stat("/data.txt")).mode).toBe(diskMode);
+        expect(await overlay.readFile("/data.txt")).toBe("ab");
+      },
+    );
+
+    it("uses the default mode for genuinely new files", async () => {
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+      await overlay.writeFile("/new.txt", "x");
+      expect((await overlay.stat("/new.txt")).mode).toBe(0o644);
+    });
+
+    it("uses the default mode when shadowing lower files on Windows", async () => {
+      // Pins the win32 rule above: no stat is paid for advisory mode bits.
+      if (process.platform !== "win32") return;
+      const filePath = path.join(tempDir, "win.txt");
+      fs.writeFileSync(filePath, "v1");
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+      await overlay.writeFile("/win.txt", "v2");
+      expect((await overlay.stat("/win.txt")).mode).toBe(0o644);
+    });
+  });
 });

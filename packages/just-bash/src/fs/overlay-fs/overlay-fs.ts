@@ -9,6 +9,15 @@
  * gates which detect symlink traversal via path comparison and return the
  * canonical path for I/O (closing the TOCTOU gap). New methods must use these
  * gates — never access the real FS directly.
+ *
+ * Concurrent modification of the underlying directory is not supported.
+ * OverlayFs does not detect changes made to the underlying directory outside
+ * the overlay while an instance is live. If such changes occur, behavior is
+ * undefined and data loss is a possible outcome — including deletion of
+ * files the overlay never saw, when applying a diff() computed against a
+ * stale view. After intentional external changes (e.g. a native run
+ * between sandbox sessions), call sync() or reset() to re-baseline before
+ * continuing.
  */
 
 import * as fs from "node:fs";
@@ -50,35 +59,67 @@ import {
   validatePath,
   validateRootDirectory,
 } from "../real-fs-utils.js";
+import {
+  type OverlayDirNode,
+  type OverlayEntryNode,
+  type OverlayFileNode,
+  OverlayTree,
+} from "./overlay-tree.js";
 
 /** Error patterns that are safe to pass through (contain virtual paths, not real ones). */
 const OVERLAY_PASSTHROUGH_ERRORS = ["ELOOP", "EFBIG", "EPERM"] as const;
 
-interface MemoryFileEntry {
-  type: "file";
+/** Kind of entry recorded in an {@link OverlayWrite}. */
+export type OverlayNodeType = "file" | "directory" | "symlink";
+
+/**
+ * A single write captured in the overlay's upper layer.
+ */
+export interface OverlayWrite {
+  /**
+   * Path relative to the overlay root, with a leading slash
+   * (e.g. `"/src/app.ts"`). Join it with the host-side root directory to
+   * materialize the change.
+   */
+  path: string;
+  /** Kind of entry written. */
+  nodeType: OverlayNodeType;
+  /**
+   * File content; the symlink target (as UTF-8 bytes) for symlinks; empty
+   * for directories and for metadata-only writes.
+   */
   content: Uint8Array;
-  /** Append segments retained without copying the complete file per append. */
-  appendChunks?: Uint8Array[];
+  /**
+   * Unix-style permission mode to apply when materializing on the host.
+   * Advisory on Windows (maps at most to the read-only attribute).
+   */
   mode: number;
+  /** Modification time; hosts may apply it (utimes) for fidelity. */
   mtime: Date;
-  identity?: string;
+  /**
+   * When true, only metadata changed (chmod/utimes via a metacopy shadow):
+   * apply `mode` and `mtime` and never touch file content.
+   */
+  metadataOnly?: boolean;
 }
 
-interface MemoryDirEntry {
-  type: "directory";
-  mode: number;
-  mtime: Date;
-  identity?: string;
+/**
+ * All changes recorded in an overlay relative to its lower directory:
+ * the upper-layer write set plus the deletions (whiteouts) of lower paths.
+ *
+ * Hosts embedding just-bash use this to apply sandboxed writes to the real
+ * project directory after execution (or prompt about them) — the overlay
+ * itself never modifies disk.
+ */
+export interface OverlayDiff {
+  /** Every entry created or modified under the mount point, sorted by path. */
+  writes: OverlayWrite[];
+  /**
+   * Root-relative paths deleted during execution, sorted. Whiteout nodes
+   * never nest, so each entry is a top-most deletion covering its subtree.
+   */
+  deletions: string[];
 }
-
-interface MemorySymlinkEntry {
-  type: "symlink";
-  target: string;
-  mode: number;
-  mtime: Date;
-}
-
-type MemoryEntry = MemoryFileEntry | MemoryDirEntry | MemorySymlinkEntry;
 
 export interface OverlayFsOptions {
   /**
@@ -132,46 +173,10 @@ export class OverlayFs implements IFileSystem {
   private readonly maxFileReadSize: number;
   private readonly maxMemoryBytes: number;
   private readonly allowSymlinks: boolean;
-  private readonly memory: Map<string, MemoryEntry> = new Map();
-  private readonly deleted: Set<string> = new Set();
+  private readonly tree: OverlayTree;
   private nextMemoryIdentity = 1;
-  private retainedMemoryBytes = 0;
 
-  private memoryEntryBytes(entry: MemoryEntry | undefined): number {
-    if (!entry || entry.type !== "file") return 0;
-    let bytes = entry.content.byteLength;
-    for (const chunk of entry.appendChunks ?? []) bytes += chunk.byteLength;
-    return bytes;
-  }
-
-  private assertMemoryCapacity(added: number, released = 0): void {
-    if (
-      !Number.isSafeInteger(added) ||
-      added < 0 ||
-      added > this.maxMemoryBytes - this.retainedMemoryBytes + released
-    ) {
-      throw new Error(
-        `ENOSPC: overlay memory byte limit exceeded (${this.maxMemoryBytes} bytes)`,
-      );
-    }
-  }
-
-  private setMemoryEntry(path: string, entry: MemoryEntry): void {
-    const released = this.memoryEntryBytes(this.memory.get(path));
-    const added = this.memoryEntryBytes(entry);
-    this.assertMemoryCapacity(added, released);
-    this.memory.set(path, entry);
-    this.retainedMemoryBytes += added - released;
-  }
-
-  private deleteMemoryEntry(path: string): void {
-    const existing = this.memory.get(path);
-    if (!existing) return;
-    this.retainedMemoryBytes -= this.memoryEntryBytes(existing);
-    this.memory.delete(path);
-  }
-
-  private identityFor(entry: MemoryEntry): string {
+  private identityFor(entry: OverlayEntryNode): string {
     if (entry.type === "symlink") return "";
     if (!entry.identity) {
       entry.identity = `overlay:${this.nextMemoryIdentity++}`;
@@ -210,6 +215,9 @@ export class OverlayFs implements IFileSystem {
     // Compute canonical root (resolves symlinks like /var -> /private/var on macOS)
     this.canonicalRoot = fs.realpathSync(this.root);
 
+    // Upper layer: entry nodes shadow lower paths, whiteouts mark deletions.
+    this.tree = new OverlayTree(this.maxMemoryBytes);
+
     // Create mount point directory structure in memory layer
     this.createMountPointDirs();
   }
@@ -227,26 +235,7 @@ export class OverlayFs implements IFileSystem {
    * Create directory entries for the mount point path
    */
   private createMountPointDirs(): void {
-    const parts = this.mountPoint.split("/").filter(Boolean);
-    let current = "";
-    for (const part of parts) {
-      current += `/${part}`;
-      if (!this.memory.has(current)) {
-        this.setMemoryEntry(current, {
-          type: "directory",
-          mode: DEFAULT_DIR_MODE,
-          mtime: new Date(),
-        });
-      }
-    }
-    // Also ensure root exists
-    if (!this.memory.has("/")) {
-      this.setMemoryEntry("/", {
-        type: "directory",
-        mode: DEFAULT_DIR_MODE,
-        mtime: new Date(),
-      });
-    }
+    this.tree.ensureDirs(this.mountPoint);
   }
 
   /**
@@ -257,22 +246,221 @@ export class OverlayFs implements IFileSystem {
   }
 
   /**
-   * Create a virtual directory in memory (sync, for initialization)
+   * Return all changes recorded in this overlay since construction (or the
+   * last {@link reset}): every write captured in the upper layer and every
+   * deletion of a lower-layer path.
+   *
+   * Paths are reported relative to the overlay root with a leading slash
+   * (e.g. `"/README.md"`), ready to join with the host-side root directory.
+   * The mount root itself is never reported, and writes outside the mount
+   * point (e.g. `/tmp` scratch files) are excluded: they have no disk
+   * counterpart to apply against.
+   *
+   * Semantics worth relying on:
+   * - **Modify** — an internal copy-up shadows the disk file; the diff
+   *   shows one write with the new content.
+   * - **Metadata-only change (chmod/utimes)** — one write with
+   *   `metadataOnly: true` and empty content; apply mode/mtime only.
+   * - **Create** — one write, including parent directories created on
+   *   demand.
+   * - **Delete then recreate** — reported as a write, not a deletion.
+   * - **`rm -rf dir`** — one deletion for `dir`, not one per child
+   *   (whiteouts never nest, so every reported deletion is top-most).
+   * - **Create then delete (never on disk)** — appears in neither list.
+   *
+   * Pure tree walk plus a synchronous existence check per whiteout and
+   * metacopy node. See the class-level policy on concurrent modification
+   * of the underlying directory.
    */
-  mkdirSync(path: string, _options?: MkdirOptions): void {
-    const normalized = normalizePath(path);
-    const parts = normalized.split("/").filter(Boolean);
-    let current = "";
-    for (const part of parts) {
-      current += `/${part}`;
-      if (!this.memory.has(current)) {
-        this.setMemoryEntry(current, {
-          type: "directory",
-          mode: DEFAULT_DIR_MODE,
-          mtime: new Date(),
+  diff(): OverlayDiff {
+    const writes: OverlayWrite[] = [];
+    const deletions: string[] = [];
+    for (const { path, node } of this.tree.preOrder()) {
+      const relative = this.getRelativeToMount(path);
+      if (relative === null || relative === "/") continue;
+      if (node.type === "whiteout") {
+        // Skip stale markers whose disk path is already gone.
+        if (this.existsOnRealFs(path)) deletions.push(relative);
+        continue;
+      }
+      if (node.type === "file") {
+        if (node.metacopy) {
+          // A metacopy node whose lower file vanished (out-of-band) has
+          // no meaningful content to report — skip rather than emit a
+          // phantom empty write.
+          if (!this.existsOnRealFs(path)) continue;
+          writes.push({
+            path: relative,
+            nodeType: "file",
+            content: new Uint8Array(0),
+            mode: node.mode,
+            mtime: node.mtime,
+            metadataOnly: true,
+          });
+        } else {
+          writes.push({
+            path: relative,
+            nodeType: "file",
+            content: this.coalesceFileContent(node, path),
+            mode: node.mode,
+            mtime: node.mtime,
+          });
+        }
+      } else if (node.type === "directory") {
+        writes.push({
+          path: relative,
+          nodeType: "directory",
+          content: new Uint8Array(0),
+          mode: node.mode,
+          mtime: node.mtime,
+        });
+      } else {
+        writes.push({
+          path: relative,
+          nodeType: "symlink",
+          content: new TextEncoder().encode(node.target),
+          mode: node.mode,
+          mtime: node.mtime,
         });
       }
     }
+    writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    deletions.sort();
+    return { writes, deletions };
+  }
+
+  /**
+   * Reconcile the overlay with current disk state: drop every upper-layer
+   * shadow that now matches the lower directory, and clear whiteouts whose
+   * disk paths no longer exist. Entries that still differ remain pending
+   * and keep appearing in {@link diff}.
+   *
+   * After the host applies writes (or a native run rewrites files),
+   * `sync()` leaves the overlay holding "exactly the differences from disk
+   * right now": applied writes and deletions disappear, failed or
+   * conflicting ones stay visible — no per-path bookkeeping needed.
+   * Matching rules: content nodes compare bytes; metacopy nodes compare
+   * mtime everywhere and mode on POSIX (mode is advisory on Windows);
+   * directories match on existence and drop only once every child was
+   * dropped (post-order guarantees children reconcile first).
+   */
+  async sync(): Promise<void> {
+    for (const { path, node } of this.tree.postOrder()) {
+      const relative = this.getRelativeToMount(path);
+      if (relative === null || relative === "/") continue;
+      if (node.type === "whiteout") {
+        // Stale marker (deletion applied, or disk changed out-of-band):
+        // nothing left to hide.
+        if (!this.existsOnRealFs(path)) this.tree.detach(path);
+        continue;
+      }
+      if (node.type === "directory" && node.children.size > 0) {
+        // Still the container of pending children.
+        continue;
+      }
+      if (await this.nodeMatchesDisk(path, node)) {
+        this.tree.detach(path);
+      }
+    }
+  }
+
+  /**
+   * Discard all pending state: clear the upper layer so the overlay
+   * re-baselines on current disk state (trust-disk switch after native
+   * runs). Unlike {@link sync}, which keeps entries that genuinely differ
+   * from disk, `reset()` deliberately forgets them.
+   */
+  reset(): void {
+    this.tree.clear();
+    this.createMountPointDirs();
+  }
+
+  /**
+   * True when the disk entry at `path` matches the upper-layer shadow:
+   * byte-identical content for full file nodes, metadata for metacopy
+   * nodes (mtime everywhere, mode on POSIX), existence for directories,
+   * same target for symlinks.
+   */
+  private async nodeMatchesDisk(
+    path: string,
+    node: OverlayEntryNode,
+  ): Promise<boolean> {
+    if (node.type === "directory") {
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        return (await fs.promises.lstat(canonical)).isDirectory();
+      } catch {
+        return false;
+      }
+    }
+
+    if (node.type === "symlink") {
+      if (!this.allowSymlinks) return false;
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        const stat = await fs.promises.lstat(canonical);
+        if (!stat.isSymbolicLink()) return false;
+        const rawTarget = await fs.promises.readlink(canonical);
+        return this.realTargetToVirtual(path, rawTarget) === node.target;
+      } catch {
+        return false;
+      }
+    }
+
+    if (node.metacopy) {
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        const stat = await fs.promises.lstat(canonical);
+        if (!stat.isFile()) return false;
+        if (stat.mtime.getTime() !== node.mtime.getTime()) return false;
+        if (
+          process.platform !== "win32" &&
+          (stat.mode & 0o7777) !== (node.mode & 0o7777)
+        ) {
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // Full file node: byte-for-byte comparison. Use the canonical path and
+    // O_NOFOLLOW for I/O, same TOCTOU discipline as readFileBuffer.
+    const canonical = this.resolveRealPath_(this.toRealPath(path));
+    if (!canonical) return false;
+    try {
+      const stat = await fs.promises.lstat(canonical);
+      if (!stat.isFile()) return false;
+      const flags = this.allowSymlinks
+        ? fs.constants.O_RDONLY
+        : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+      const fh = await fs.promises.open(canonical, flags);
+      let disk: Uint8Array;
+      try {
+        disk = new Uint8Array(await fh.readFile());
+      } finally {
+        await fh.close();
+      }
+      const upper = this.coalesceFileContent(node, path);
+      if (disk.byteLength !== upper.byteLength) return false;
+      for (let i = 0; i < disk.byteLength; i++) {
+        if (disk[i] !== upper[i]) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Create a virtual directory in memory (sync, for initialization)
+   */
+  mkdirSync(path: string, _options?: MkdirOptions): void {
+    this.tree.ensureDirs(normalizePath(path), (p) => this.lowerChildren(p));
   }
 
   /**
@@ -289,7 +477,7 @@ export class OverlayFs implements IFileSystem {
       content instanceof Uint8Array
         ? content
         : new TextEncoder().encode(content);
-    this.setMemoryEntry(normalized, {
+    this.tree.attach(normalized, {
       type: "file",
       content: buffer,
       mode: DEFAULT_FILE_MODE,
@@ -392,33 +580,41 @@ export class OverlayFs implements IFileSystem {
   private ensureParentDirs(path: string): void {
     const dir = dirname(path);
     if (dir === "/") return;
-
-    if (!this.memory.has(dir)) {
-      this.ensureParentDirs(dir);
-      this.setMemoryEntry(dir, {
-        type: "directory",
-        mode: DEFAULT_DIR_MODE,
-        mtime: new Date(),
-      });
-    }
-    // Remove from deleted set if it was there
-    this.deleted.delete(dir);
+    // Creates missing ancestors and resurrects whiteouted ones, marking
+    // their deleted lower-layer children with fresh whiteouts.
+    this.tree.ensureDirs(dir, (p) => this.lowerChildren(p));
   }
 
   /**
-   * Check if a path exists in the overlay (memory + real fs - deleted)
+   * List the lower-layer (real-FS) child names of a directory, for
+   * whiteout population during resurrection. Returns null when the path
+   * has no readable lower directory — lookups then degrade to individual
+   * lower-layer errors rather than leaking.
+   */
+  private lowerChildren(virtualPath: string): string[] | null {
+    const canonical = this.resolveRealPath_(this.toRealPath(virtualPath));
+    if (!canonical) return null;
+    try {
+      return fs.readdirSync(canonical);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if a path exists in the overlay (tree + real fs - whiteouts)
    */
   private async existsInOverlay(virtualPath: string): Promise<boolean> {
     const normalized = normalizePath(virtualPath);
 
-    // Deleted in memory layer?
-    if (this.deleted.has(normalized)) {
-      return false;
+    const result = this.tree.descend(normalized);
+    if (result.kind === "found") {
+      return result.node.type !== "whiteout";
     }
-
-    // Exists in memory layer?
-    if (this.memory.has(normalized)) {
-      return true;
+    if (result.kind === "blocked" || result.kind === "notdir") {
+      // Hidden by a whiteout at or above the path, or unreachable below a
+      // non-directory shadow.
+      return false;
     }
 
     // Check real filesystem using lstat to avoid following OS-level symlinks.
@@ -468,14 +664,18 @@ export class OverlayFs implements IFileSystem {
     }
     seen.add(normalized);
 
-    // Check if deleted
-    if (this.deleted.has(normalized)) {
+    const result = this.tree.descend(normalized);
+    if (result.kind === "blocked") {
       throw new Error(`ENOENT: no such file or directory, open '${path}'`);
     }
-
-    // Check memory layer first
-    const memEntry = this.memory.get(normalized);
-    if (memEntry) {
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, open '${path}'`);
+    }
+    if (result.kind === "found") {
+      const memEntry = result.node;
+      if (memEntry.type === "whiteout") {
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      }
       if (memEntry.type === "symlink") {
         const target = this.resolveSymlink(normalized, memEntry.target);
         return this.readFileBuffer(target, seen);
@@ -485,30 +685,45 @@ export class OverlayFs implements IFileSystem {
           `EISDIR: illegal operation on a directory, read '${path}'`,
         );
       }
-      if (!memEntry.appendChunks || memEntry.appendChunks.length === 0) {
-        return memEntry.content;
+      if (!memEntry.metacopy) {
+        return this.coalesceFileContent(memEntry, path);
       }
-      const total = memEntry.appendChunks.reduce(
-        (sum, chunk) => sum + chunk.byteLength,
-        memEntry.content.byteLength,
-      );
-      if (!Number.isSafeInteger(total)) {
-        throw new Error(`EFBIG: file too large, read '${path}'`);
+      // Metacopy: data still lives in the lower layer. POSIX serves
+      // fall-through reads (metadata is worth the laziness); Windows
+      // promotes on first read (metadata is advisory there, so data
+      // residency is the only value worth paying for).
+      const data = await this.readLowerFileBytes(normalized, path, seen);
+      if (process.platform === "win32") {
+        try {
+          this.tree.attach(normalized, {
+            type: "file",
+            content: data,
+            mode: memEntry.mode,
+            mtime: memEntry.mtime,
+          });
+        } catch {
+          // Promotion is an optimization (and can hit the memory quota);
+          // fall-through reads remain correct.
+        }
       }
-      const combined = new Uint8Array(total);
-      combined.set(memEntry.content);
-      let offset = memEntry.content.byteLength;
-      for (const chunk of memEntry.appendChunks) {
-        combined.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      memEntry.content = combined;
-      memEntry.appendChunks = undefined;
-      return combined;
+      return data;
     }
 
-    // Fall back to real filesystem.  Use the canonical path for I/O to
-    // close the TOCTOU gap between validation and use.
+    return this.readLowerFileBytes(normalized, path, seen);
+  }
+
+  /**
+   * Read a path from the lower layer (real filesystem), following lower
+   * symlinks through the virtual layer. Shared by clean-miss reads and
+   * metacopy fall-through.
+   */
+  private async readLowerFileBytes(
+    normalized: string,
+    path: string,
+    seen: Set<string>,
+  ): Promise<Uint8Array> {
+    // Use the canonical path for I/O to close the TOCTOU gap between
+    // validation and use.
     const canonical = this.resolveRealPath_(this.toRealPath(normalized));
     if (!canonical) {
       throw new Error(`ENOENT: no such file or directory, open '${path}'`);
@@ -561,6 +776,36 @@ export class OverlayFs implements IFileSystem {
     }
   }
 
+  /**
+   * Coalesce a memory file node's base content and append chunks into a
+   * single buffer. Mutates the node to store the combined result.
+   */
+  private coalesceFileContent(
+    entry: OverlayFileNode,
+    virtualPath: string,
+  ): Uint8Array {
+    if (!entry.appendChunks || entry.appendChunks.length === 0) {
+      return entry.content;
+    }
+    const total = entry.appendChunks.reduce(
+      (sum, chunk) => sum + chunk.byteLength,
+      entry.content.byteLength,
+    );
+    if (!Number.isSafeInteger(total)) {
+      throw new Error(`EFBIG: file too large, read '${virtualPath}'`);
+    }
+    const combined = new Uint8Array(total);
+    combined.set(entry.content);
+    let offset = entry.content.byteLength;
+    for (const chunk of entry.appendChunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    entry.content = combined;
+    entry.appendChunks = undefined;
+    return combined;
+  }
+
   async writeFile(
     path: string,
     content: FileContent,
@@ -574,13 +819,43 @@ export class OverlayFs implements IFileSystem {
     const encoding = getEncoding(options);
     const buffer = toBuffer(content, encoding);
 
-    this.setMemoryEntry(normalized, {
+    this.tree.attach(normalized, {
       type: "file",
       content: buffer,
-      mode: DEFAULT_FILE_MODE,
+      mode: await this.inheritedMode(normalized),
       mtime: new Date(),
     });
-    this.deleted.delete(normalized);
+  }
+
+  /**
+   * Mode for a newly attached file shadow: the current entry's mode when
+   * overwriting an upper-layer file, the lower file's mode when shadowing
+   * a lower-layer file (POSIX O_TRUNC preserves mode), DEFAULT_FILE_MODE
+   * for genuinely new files (including recreate-after-delete).
+   *
+   * The lower-layer stat is POSIX-only: Windows modes are synthesized
+   * (0o666/0o444 from the read-only attribute, exec bits from the file
+   * extension) and nothing in the overlay enforces them, so the syscall
+   * would buy fiction.
+   */
+  private async inheritedMode(normalized: string): Promise<number> {
+    const existing = this.entryAt(normalized);
+    if (existing?.type === "file") {
+      return existing.mode;
+    }
+    if (existing?.type === "directory") {
+      return DEFAULT_FILE_MODE; // attach() will reject with EISDIR
+    }
+    if (process.platform === "win32") {
+      return DEFAULT_FILE_MODE;
+    }
+    try {
+      const st = await this.stat(normalized);
+      if (st.isFile) return st.mode;
+    } catch {
+      // New file, or hidden by a whiteout (recreate-after-delete).
+    }
+    return DEFAULT_FILE_MODE;
   }
 
   async appendFile(
@@ -594,34 +869,55 @@ export class OverlayFs implements IFileSystem {
     const encoding = getEncoding(options);
     const newBuffer = toBuffer(content, encoding);
 
-    const existingEntry = this.memory.get(normalized);
-    if (existingEntry?.type === "file") {
-      this.assertMemoryCapacity(newBuffer.byteLength);
-      if (!existingEntry.appendChunks) existingEntry.appendChunks = [];
-      existingEntry.appendChunks.push(newBuffer);
-      this.retainedMemoryBytes += newBuffer.byteLength;
-      existingEntry.mtime = new Date();
-      this.deleted.delete(normalized);
+    const result = this.tree.descend(normalized);
+    if (result.kind === "found" && result.node.type === "file") {
+      const node = result.node;
+      if (node.metacopy) {
+        // Complete the copy-up: lower data + append chunk, preserving the
+        // metacopy node's mode.
+        const base = await this.readLowerFileBytes(normalized, path, new Set());
+        this.tree.attach(normalized, {
+          type: "file",
+          content: base,
+          appendChunks: [newBuffer],
+          mode: node.mode,
+          mtime: new Date(),
+        });
+        return;
+      }
+      this.tree.appendChunk(node, newBuffer);
+      node.mtime = new Date();
       return;
     }
+    if (result.kind === "blocked") {
+      throw new Error(`ENOENT: no such file or directory, append '${path}'`);
+    }
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, append '${path}'`);
+    }
 
-    // Try to read existing content
+    // Whiteout at the exact path: no lower-layer content to append to
+    // (recreate-after-delete starts empty). Otherwise read through — this
+    // resolves symlinks and reads lower-layer content like before.
     let existingBuffer: Uint8Array;
-    try {
-      existingBuffer = await this.readFileBuffer(normalized);
-    } catch {
+    if (result.kind === "found" && result.node.type === "whiteout") {
       existingBuffer = new Uint8Array(0);
+    } else {
+      try {
+        existingBuffer = await this.readFileBuffer(normalized);
+      } catch {
+        existingBuffer = new Uint8Array(0);
+      }
     }
 
     this.ensureParentDirs(normalized);
-    this.setMemoryEntry(normalized, {
+    this.tree.attach(normalized, {
       type: "file",
       content: existingBuffer,
       appendChunks: [newBuffer],
-      mode: DEFAULT_FILE_MODE,
+      mode: await this.inheritedMode(normalized),
       mtime: new Date(),
     });
-    this.deleted.delete(normalized);
   }
 
   async exists(path: string): Promise<boolean> {
@@ -643,38 +939,24 @@ export class OverlayFs implements IFileSystem {
     }
     seen.add(normalized);
 
-    if (this.deleted.has(normalized)) {
+    const result = this.tree.descend(normalized);
+    if (result.kind === "blocked") {
       throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
     }
-
-    // Check memory layer first
-    const entry = this.memory.get(normalized);
-    if (entry) {
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, stat '${path}'`);
+    }
+    if (result.kind === "found") {
+      const entry = result.node;
+      if (entry.type === "whiteout") {
+        throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+      }
       // Follow symlinks
       if (entry.type === "symlink") {
         const target = this.resolveSymlink(normalized, entry.target);
         return this.stat(target, seen);
       }
-
-      let size = 0;
-      if (entry.type === "file") {
-        size =
-          entry.content.length +
-          (entry.appendChunks?.reduce(
-            (sum, chunk) => sum + chunk.byteLength,
-            0,
-          ) ?? 0);
-      }
-
-      return {
-        isFile: entry.type === "file",
-        isDirectory: entry.type === "directory",
-        isSymbolicLink: false,
-        mode: entry.mode,
-        size,
-        mtime: entry.mtime,
-        identity: this.identityFor(entry),
-      };
+      return this.memoryEntryStat(entry);
     }
 
     // Fall back to real filesystem.  Use the canonical path for I/O to
@@ -720,43 +1002,19 @@ export class OverlayFs implements IFileSystem {
     validatePath(path, "lstat");
     const normalized = normalizePath(path);
 
-    if (this.deleted.has(normalized)) {
+    const result = this.tree.descend(normalized);
+    if (result.kind === "blocked") {
       throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
     }
-
-    // Check memory layer first
-    const entry = this.memory.get(normalized);
-    if (entry) {
-      if (entry.type === "symlink") {
-        return {
-          isFile: false,
-          isDirectory: false,
-          isSymbolicLink: true,
-          mode: entry.mode,
-          size: entry.target.length,
-          mtime: entry.mtime,
-        };
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, lstat '${path}'`);
+    }
+    if (result.kind === "found") {
+      const entry = result.node;
+      if (entry.type === "whiteout") {
+        throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
       }
-
-      let size = 0;
-      if (entry.type === "file") {
-        size =
-          entry.content.length +
-          (entry.appendChunks?.reduce(
-            (sum, chunk) => sum + chunk.byteLength,
-            0,
-          ) ?? 0);
-      }
-
-      return {
-        isFile: entry.type === "file",
-        isDirectory: entry.type === "directory",
-        isSymbolicLink: false,
-        mode: entry.mode,
-        size,
-        mtime: entry.mtime,
-        identity: this.identityFor(entry),
-      };
+      return this.memoryEntryStat(entry);
     }
 
     // Fall back to real filesystem
@@ -786,6 +1044,44 @@ export class OverlayFs implements IFileSystem {
       }
       this.sanitizeError(e, path, "lstat");
     }
+  }
+
+  /**
+   * Build an FsStat for an upper-layer entry node (lstat semantics:
+   * symlinks are reported, not followed).
+   */
+  private memoryEntryStat(entry: OverlayEntryNode): FsStat {
+    if (entry.type === "symlink") {
+      return {
+        isFile: false,
+        isDirectory: false,
+        isSymbolicLink: true,
+        mode: entry.mode,
+        size: entry.target.length,
+        mtime: entry.mtime,
+      };
+    }
+
+    let size = 0;
+    if (entry.type === "file") {
+      size = entry.metacopy
+        ? (entry.lowerSize ?? 0)
+        : entry.content.byteLength +
+          (entry.appendChunks?.reduce(
+            (sum, chunk) => sum + chunk.byteLength,
+            0,
+          ) ?? 0);
+    }
+
+    return {
+      isFile: entry.type === "file",
+      isDirectory: entry.type === "directory",
+      isSymbolicLink: false,
+      mode: entry.mode,
+      size,
+      mtime: entry.mtime,
+      identity: this.identityFor(entry),
+    };
   }
 
   private resolveSymlink(symlinkPath: string, target: string): string {
@@ -847,12 +1143,10 @@ export class OverlayFs implements IFileSystem {
       }
     }
 
-    this.setMemoryEntry(normalized, {
-      type: "directory",
-      mode: DEFAULT_DIR_MODE,
-      mtime: new Date(),
-    });
-    this.deleted.delete(normalized);
+    // ensureDirs creates the directory and any (already validated) parent
+    // shadows, and resurrects a whiteout at this path with lower-layer
+    // whiteouts populated — a plain attach would lose the deletion records.
+    this.tree.ensureDirs(normalized, (p) => this.lowerChildren(p));
   }
 
   /**
@@ -863,40 +1157,39 @@ export class OverlayFs implements IFileSystem {
     path: string,
     normalized: string,
   ): Promise<Map<string, DirentEntry>> {
-    if (this.deleted.has(normalized)) {
+    const entriesMap = new Map<string, DirentEntry>();
+    const hiddenChildren = new Set<string>();
+
+    const result = this.tree.descend(normalized);
+    if (result.kind === "blocked") {
       throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
     }
-
-    const entriesMap = new Map<string, DirentEntry>();
-    const deletedChildren = new Set<string>();
-
-    // Collect deleted entries that are direct children of this path
-    const prefix = normalized === "/" ? "/" : `${normalized}/`;
-    for (const deletedPath of this.deleted) {
-      if (deletedPath.startsWith(prefix)) {
-        const rest = deletedPath.slice(prefix.length);
-        const name = rest.split("/")[0];
-        if (name && !rest.includes("/", name.length)) {
-          deletedChildren.add(name);
-        }
-      }
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
     }
-
-    // Add entries from memory layer (with type info)
-    for (const [memPath, entry] of this.memory) {
-      if (memPath === normalized) continue;
-      if (memPath.startsWith(prefix)) {
-        const rest = memPath.slice(prefix.length);
-        const name = rest.split("/")[0];
-        if (name && !deletedChildren.has(name) && !rest.includes("/", 1)) {
-          // Direct child
-          entriesMap.set(name, {
-            name,
-            isFile: entry.type === "file",
-            isDirectory: entry.type === "directory",
-            isSymbolicLink: entry.type === "symlink",
-          });
+    let dirNode: OverlayDirNode | undefined;
+    if (result.kind === "found") {
+      const node = result.node;
+      if (node.type === "whiteout") {
+        throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+      }
+      if (node.type !== "directory") {
+        throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
+      }
+      dirNode = node;
+      // Add entries from the upper layer (with type info); whiteout
+      // children hide same-named lower-layer entries below.
+      for (const [name, child] of node.children) {
+        if (child.type === "whiteout") {
+          hiddenChildren.add(name);
+          continue;
         }
+        entriesMap.set(name, {
+          name,
+          isFile: child.type === "file",
+          isDirectory: child.type === "directory",
+          isSymbolicLink: child.type === "symlink",
+        });
       }
     }
 
@@ -913,7 +1206,7 @@ export class OverlayFs implements IFileSystem {
           const dirStat = await fs.promises.lstat(canonical);
           if (dirStat.isSymbolicLink()) {
             // Treat as non-existent — don't leak real-FS entries
-            if (!this.memory.has(normalized)) {
+            if (!dirNode) {
               throw new Error(
                 `ENOENT: no such file or directory, scandir '${path}'`,
               );
@@ -926,7 +1219,7 @@ export class OverlayFs implements IFileSystem {
         });
         for (const dirent of realEntries) {
           if (
-            !deletedChildren.has(dirent.name) &&
+            !hiddenChildren.has(dirent.name) &&
             !entriesMap.has(dirent.name)
           ) {
             entriesMap.set(dirent.name, {
@@ -940,7 +1233,7 @@ export class OverlayFs implements IFileSystem {
       } catch (e) {
         // If it's ENOENT and we don't have it in memory, throw
         if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-          if (!this.memory.has(normalized)) {
+          if (!dirNode) {
             throw new Error(
               `ENOENT: no such file or directory, scandir '${path}'`,
             );
@@ -967,9 +1260,16 @@ export class OverlayFs implements IFileSystem {
     const seen = new Set<string>();
     let didFollowSymlink = followedSymlink;
 
-    // Check memory layer first
-    let entry = this.memory.get(normalized);
-    while (entry && entry.type === "symlink") {
+    // Check the upper layer first, following symlinks
+    for (;;) {
+      const result = this.tree.descend(normalized);
+      if (result.kind !== "found") break;
+      const entry = result.node;
+      if (entry.type !== "symlink") {
+        // Entry or whiteout: virtually present — readdirCore reports
+        // ENOENT for whiteouts and ENOTDIR for non-directories.
+        return { normalized, outsideOverlay: false };
+      }
       if (seen.has(normalized)) {
         throw new Error(
           `ELOOP: too many levels of symbolic links, scandir '${path}'`,
@@ -978,12 +1278,6 @@ export class OverlayFs implements IFileSystem {
       seen.add(normalized);
       didFollowSymlink = true;
       normalized = this.resolveSymlink(normalized, entry.target);
-      entry = this.memory.get(normalized);
-    }
-
-    // If in memory and not a symlink, we're done
-    if (entry) {
-      return { normalized, outsideOverlay: false };
     }
 
     // Check if the resolved path is within the overlay's mount point
@@ -1069,15 +1363,8 @@ export class OverlayFs implements IFileSystem {
       const stat = await this.stat(normalized);
       if (stat.isDirectory) {
         const children = await this.readdir(normalized);
-        if (children.length > 0) {
-          if (!options?.recursive) {
-            throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
-          }
-          for (const child of children) {
-            const childPath =
-              normalized === "/" ? `/${child}` : `${normalized}/${child}`;
-            await this.rm(childPath, options);
-          }
+        if (children.length > 0 && !options?.recursive) {
+          throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
         }
       }
     } catch (e) {
@@ -1092,14 +1379,14 @@ export class OverlayFs implements IFileSystem {
       // If stat fails, we'll just mark it as deleted
     }
 
-    // Remove from memory layer
-    this.deleteMemoryEntry(normalized);
-
-    // Only add a tombstone when hiding a real-FS path.
-    // For memory-only files there's nothing to hide, so skip the tombstone
-    // to prevent unbounded growth of the deleted set.
+    // Drop any upper-layer state and, when hiding a real-FS path, leave a
+    // whiteout in its place. The tree releases the dropped subtree's byte
+    // accounting, and the whiteout hides all lower-layer descendants — no
+    // per-child recursion or per-child tombstones are needed.
     if (this.existsOnRealFs(normalized)) {
-      this.deleted.add(normalized);
+      this.tree.putWhiteout(normalized);
+    } else {
+      this.tree.detach(normalized);
     }
   }
 
@@ -1165,13 +1452,13 @@ export class OverlayFs implements IFileSystem {
   }
 
   getAllPaths(): string[] {
-    // This is expensive for overlay fs, but we can return what's in memory
-    // plus scan the real filesystem
-    const paths = new Set<string>(this.memory.keys());
-
-    // Remove deleted paths
-    for (const deleted of this.deleted) {
-      paths.delete(deleted);
+    // This is expensive for overlay fs, but we can return what's in the
+    // upper layer plus scan the real filesystem
+    const paths = new Set<string>();
+    for (const { path, node } of this.tree.preOrder()) {
+      if (node.type !== "whiteout") {
+        paths.add(path);
+      }
     }
 
     // Add paths from real filesystem (this is a sync operation, be careful)
@@ -1181,7 +1468,9 @@ export class OverlayFs implements IFileSystem {
   }
 
   private scanRealFs(virtualDir: string, paths: Set<string>): void {
-    if (this.deleted.has(virtualDir)) return;
+    // Skip directories whose lower layer is hidden: a whiteout at or
+    // above them, or a non-directory shadow in the way.
+    if (this.lowerHidden(virtualDir)) return;
 
     // Use the canonical path for I/O to close the TOCTOU gap.
     const canonical = this.resolveRealPath_(this.toRealPath(virtualDir));
@@ -1192,7 +1481,7 @@ export class OverlayFs implements IFileSystem {
       for (const entry of entries) {
         const virtualPath =
           virtualDir === "/" ? `/${entry}` : `${virtualDir}/${entry}`;
-        if (this.deleted.has(virtualPath)) continue;
+        if (this.lowerHidden(virtualPath)) continue;
         paths.add(virtualPath);
 
         const entryPath = nodePath.join(canonical, entry);
@@ -1208,6 +1497,43 @@ export class OverlayFs implements IFileSystem {
     }
   }
 
+  /** True when a whiteout hides `virtualPath` at or above it. */
+  private whiteoutBlocked(virtualPath: string): boolean {
+    const result = this.tree.descend(virtualPath);
+    return (
+      result.kind === "blocked" ||
+      (result.kind === "found" && result.node.type === "whiteout")
+    );
+  }
+
+  /**
+   * True when the lower layer at `virtualPath` is invisible: a whiteout at
+   * or above the path, or a non-directory shadow in the way. Missing paths
+   * (clean fall-through) return false.
+   */
+  private lowerHidden(virtualPath: string): boolean {
+    const result = this.tree.descend(virtualPath);
+    switch (result.kind) {
+      case "blocked":
+      case "notdir":
+        return true;
+      case "found":
+        // Whiteouts mark deletions; file/symlink shadows are total.
+        return result.node.type !== "directory";
+      default:
+        return false;
+    }
+  }
+
+  /** The upper-layer entry at `virtualPath`, or undefined. */
+  private entryAt(virtualPath: string): OverlayEntryNode | undefined {
+    const result = this.tree.descend(virtualPath);
+    if (result.kind === "found" && result.node.type !== "whiteout") {
+      return result.node;
+    }
+    return undefined;
+  }
+
   async chmod(path: string, mode: number): Promise<void> {
     validatePath(path, "chmod");
     this.assertWritable(`chmod '${path}'`);
@@ -1218,26 +1544,31 @@ export class OverlayFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory, chmod '${path}'`);
     }
 
-    // If in memory, update there
-    const entry = this.memory.get(normalized);
+    // If in the upper layer, update there
+    const entry = this.entryAt(normalized);
     if (entry) {
       entry.mode = mode;
       return;
     }
 
-    // If from real fs, we need to copy to memory layer first
+    // If from real fs, attach a metacopy node: metadata moves to the
+    // upper layer, data stays lower (copied lazily on first content
+    // write). chmod changes ctime, not mtime — preserve the lower mtime.
     const stat = await this.stat(normalized);
+    this.ensureParentDirs(normalized);
     if (stat.isFile) {
-      const content = await this.readFileBuffer(normalized);
-      this.setMemoryEntry(normalized, {
+      this.tree.attach(normalized, {
         type: "file",
-        content,
+        content: new Uint8Array(0),
+        metacopy: true,
+        lowerSize: stat.size,
         mode,
-        mtime: new Date(),
+        mtime: stat.mtime,
       });
     } else if (stat.isDirectory) {
-      this.setMemoryEntry(normalized, {
+      this.tree.attach(normalized, {
         type: "directory",
+        children: new Map(),
         mode,
         mtime: new Date(),
       });
@@ -1258,13 +1589,12 @@ export class OverlayFs implements IFileSystem {
     }
 
     this.ensureParentDirs(normalized);
-    this.setMemoryEntry(normalized, {
+    this.tree.attach(normalized, {
       type: "symlink",
       target,
       mode: SYMLINK_MODE,
       mtime: new Date(),
     });
-    this.deleted.delete(normalized);
   }
 
   async link(existingPath: string, newPath: string): Promise<void> {
@@ -1294,27 +1624,33 @@ export class OverlayFs implements IFileSystem {
     // Copy content to new location
     const content = await this.readFileBuffer(existingNorm);
     this.ensureParentDirs(newNorm);
-    this.setMemoryEntry(newNorm, {
+    this.tree.attach(newNorm, {
       type: "file",
       content,
       mode: existingStat.mode,
       mtime: new Date(),
       identity: existingStat.identity ?? `overlay:${this.nextMemoryIdentity++}`,
     });
-    this.deleted.delete(newNorm);
   }
 
   async readlink(path: string): Promise<string> {
     validatePath(path, "readlink");
     const normalized = normalizePath(path);
 
-    if (this.deleted.has(normalized)) {
+    const result = this.tree.descend(normalized);
+    if (result.kind === "blocked") {
       throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
     }
-
-    // Check memory layer first
-    const entry = this.memory.get(normalized);
-    if (entry) {
+    if (result.kind === "notdir") {
+      throw new Error(`ENOTDIR: not a directory, readlink '${path}'`);
+    }
+    if (result.kind === "found") {
+      const entry = result.node;
+      if (entry.type === "whiteout") {
+        throw new Error(
+          `ENOENT: no such file or directory, readlink '${path}'`,
+        );
+      }
       if (entry.type !== "symlink") {
         throw new Error(`EINVAL: invalid argument, readlink '${path}'`);
       }
@@ -1391,15 +1727,15 @@ export class OverlayFs implements IFileSystem {
           );
         }
 
-        // Check if deleted
-        if (this.deleted.has(resolved)) {
+        // Check if hidden by a whiteout
+        if (this.whiteoutBlocked(resolved)) {
           throw new Error(
             `ENOENT: no such file or directory, realpath '${path}'`,
           );
         }
 
-        // Check memory layer first
-        let entry = this.memory.get(resolved);
+        // Check the upper layer first
+        let entry = this.entryAt(resolved);
         let loopCount = 0;
         const maxLoops = MAX_SYMLINK_DEPTH;
 
@@ -1414,13 +1750,13 @@ export class OverlayFs implements IFileSystem {
             );
           }
 
-          if (this.deleted.has(resolved)) {
+          if (this.whiteoutBlocked(resolved)) {
             throw new Error(
               `ENOENT: no such file or directory, realpath '${path}'`,
             );
           }
 
-          entry = this.memory.get(resolved);
+          entry = this.entryAt(resolved);
         }
 
         if (loopCount >= maxLoops) {
@@ -1522,26 +1858,30 @@ export class OverlayFs implements IFileSystem {
       throw new Error(`ENOENT: no such file or directory, utimes '${path}'`);
     }
 
-    // If in memory, update there
-    const entry = this.memory.get(normalized);
+    // If in the upper layer, update there
+    const entry = this.entryAt(normalized);
     if (entry) {
       entry.mtime = mtime;
       return;
     }
 
-    // If from real fs, we need to copy to memory layer first
+    // If from real fs, attach a metacopy node: metadata moves up, data
+    // stays lower until the first content write.
     const stat = await this.stat(normalized);
+    this.ensureParentDirs(normalized);
     if (stat.isFile) {
-      const content = await this.readFileBuffer(normalized);
-      this.setMemoryEntry(normalized, {
+      this.tree.attach(normalized, {
         type: "file",
-        content,
+        content: new Uint8Array(0),
+        metacopy: true,
+        lowerSize: stat.size,
         mode: stat.mode,
         mtime,
       });
     } else if (stat.isDirectory) {
-      this.setMemoryEntry(normalized, {
+      this.tree.attach(normalized, {
         type: "directory",
+        children: new Map(),
         mode: stat.mode,
         mtime,
       });

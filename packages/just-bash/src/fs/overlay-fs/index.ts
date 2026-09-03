@@ -1,1 +1,7 @@
-export { OverlayFs, type OverlayFsOptions } from "./overlay-fs.js";
+export {
+  type OverlayDiff,
+  OverlayFs,
+  type OverlayFsOptions,
+  type OverlayNodeType,
+  type OverlayWrite,
+} from "./overlay-fs.js";
