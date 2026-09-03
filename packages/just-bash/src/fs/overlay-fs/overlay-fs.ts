@@ -435,6 +435,9 @@ export class OverlayFs implements IFileSystem {
     try {
       const stat = await fs.promises.lstat(canonical);
       if (!stat.isFile()) return false;
+      const upper = this.coalesceFileContent(node, path);
+      // Cheap reject: sizes must match before any content is read.
+      if (stat.size !== upper.byteLength) return false;
       const flags = this.allowSymlinks
         ? fs.constants.O_RDONLY
         : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
@@ -445,7 +448,6 @@ export class OverlayFs implements IFileSystem {
       } finally {
         await fh.close();
       }
-      const upper = this.coalesceFileContent(node, path);
       if (disk.byteLength !== upper.byteLength) return false;
       for (let i = 0; i < disk.byteLength; i++) {
         if (disk[i] !== upper[i]) return false;
@@ -1453,7 +1455,9 @@ export class OverlayFs implements IFileSystem {
 
   getAllPaths(): string[] {
     // This is expensive for overlay fs, but we can return what's in the
-    // upper layer plus scan the real filesystem
+    // upper layer plus scan the real filesystem. The scan starts at the
+    // mount point: paths outside it have no real-FS counterpart (and
+    // scanning from "/" would find nothing at all on non-root mounts).
     const paths = new Set<string>();
     for (const { path, node } of this.tree.preOrder()) {
       if (node.type !== "whiteout") {
@@ -1462,7 +1466,7 @@ export class OverlayFs implements IFileSystem {
     }
 
     // Add paths from real filesystem (this is a sync operation, be careful)
-    this.scanRealFs("/", paths);
+    this.scanRealFs(this.mountPoint, paths);
 
     return Array.from(paths);
   }

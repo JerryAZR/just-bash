@@ -999,4 +999,20 @@ describe("OverlayFs", () => {
       expect((await overlay.stat("/win.txt")).mode).toBe(0o644);
     });
   });
+
+  describe("getAllPaths", () => {
+    it("includes real-FS paths on a non-root mount", async () => {
+      fs.mkdirSync(path.join(tempDir, "src/nested"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "src/nested/deep.txt"), "d");
+      fs.writeFileSync(path.join(tempDir, "README.md"), "r");
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/p" });
+      await overlay.writeFile("/p/upper.txt", "u");
+      await overlay.rm("/p/README.md");
+
+      const paths = overlay.getAllPaths();
+      expect(paths).toContain("/p/src/nested/deep.txt");
+      expect(paths).toContain("/p/upper.txt");
+      expect(paths).not.toContain("/p/README.md");
+    });
+  });
 });
