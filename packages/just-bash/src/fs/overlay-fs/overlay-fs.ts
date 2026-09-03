@@ -516,9 +516,32 @@ export class OverlayFs implements IFileSystem {
     this.tree.attach(normalized, {
       type: "file",
       content: buffer,
-      mode: DEFAULT_FILE_MODE,
+      mode: await this.inheritedMode(normalized),
       mtime: new Date(),
     });
+  }
+
+  /**
+   * Mode for a newly attached file shadow: the current entry's mode when
+   * overwriting an upper-layer file, the lower file's mode when shadowing
+   * a lower-layer file (POSIX O_TRUNC preserves mode), DEFAULT_FILE_MODE
+   * for genuinely new files (including recreate-after-delete).
+   */
+  private async inheritedMode(normalized: string): Promise<number> {
+    const existing = this.entryAt(normalized);
+    if (existing?.type === "file") {
+      return existing.mode;
+    }
+    if (existing?.type === "directory") {
+      return DEFAULT_FILE_MODE; // attach() will reject with EISDIR
+    }
+    try {
+      const st = await this.stat(normalized);
+      if (st.isFile) return st.mode;
+    } catch {
+      // New file, or hidden by a whiteout (recreate-after-delete).
+    }
+    return DEFAULT_FILE_MODE;
   }
 
   async appendFile(
@@ -564,7 +587,7 @@ export class OverlayFs implements IFileSystem {
       type: "file",
       content: existingBuffer,
       appendChunks: [newBuffer],
-      mode: DEFAULT_FILE_MODE,
+      mode: await this.inheritedMode(normalized),
       mtime: new Date(),
     });
   }
