@@ -30,6 +30,7 @@ import {
   ErrexitError,
   ExecutionLimitError,
   ExitError,
+  UnresolvedCommandError,
   GlobError,
   isScopeExitError,
   SubshellExitError,
@@ -154,6 +155,7 @@ async function executeBoundedStatements(
       isScopeExitError(error) ||
       error instanceof ErrexitError ||
       error instanceof ExitError ||
+      error instanceof UnresolvedCommandError ||
       error instanceof ExecutionLimitError ||
       error instanceof SubshellExitError
     ) {

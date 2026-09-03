@@ -11,6 +11,7 @@ import {
   BreakError,
   ContinueError,
   ExitError,
+  UnresolvedCommandError,
   ReturnError,
 } from "../errors.js";
 import { failure, OK } from "../helpers/result.js";
@@ -78,7 +79,8 @@ export async function handleEval(
       error instanceof BreakError ||
       error instanceof ContinueError ||
       error instanceof ReturnError ||
-      error instanceof ExitError
+      error instanceof ExitError ||
+      error instanceof UnresolvedCommandError
     ) {
       throw error;
     }

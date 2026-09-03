@@ -65,6 +65,15 @@ export interface ExecResult {
 export interface BashExecResult extends ExecResult {
   env: Record<string, string>;
   metadata?: Record<string, unknown>;
+  /**
+   * Command names that failed resolution ("command not found") during this
+   * exec() call, deduplicated in first-encountered order. Captured from
+   * anywhere in the script — subshells, pipelines, command substitutions,
+   * nested `bash -c`. Set by Bash.exec(); empty when every command
+   * resolved. See BashOptions.abortOnUnresolvedCommands for fail-fast
+   * behavior.
+   */
+  unresolvedCommands?: string[];
 }
 
 /** Options for exec calls within commands (internal API) */

@@ -58,6 +58,7 @@ export class ExecutionScope {
   private poisoned: ExecutionLimitError | ExecutionAbortedError | undefined;
   private closed = false;
   private readonly startedAt = Date.now();
+  private readonly unresolvedCommands: string[] = [];
 
   /** Bytes still available for prospective intermediate allocations. */
   get remainingLiveBytes(): number {
@@ -72,7 +73,28 @@ export class ExecutionScope {
   constructor(
     private readonly limits: Required<ExecutionLimits>,
     private readonly signal: AbortSignal | undefined = undefined,
+    /**
+     * When true, a command-resolution miss aborts the whole execution
+     * (UnresolvedCommandError) instead of continuing bash-style with 127.
+     */
+    readonly abortOnUnresolvedCommands = false,
   ) {}
+
+  /**
+   * Record a command-resolution miss ("command not found"), deduplicated
+   * in first-encountered order. Misses anywhere in the execution funnel
+   * here — subshells, pipelines, command substitutions, nested `bash -c`.
+   */
+  recordUnresolvedCommand(name: string): void {
+    if (!this.unresolvedCommands.includes(name)) {
+      this.unresolvedCommands.push(name);
+    }
+  }
+
+  /** Names that failed command resolution during this execution. */
+  get unresolvedCommandNames(): string[] {
+    return [...this.unresolvedCommands];
+  }
 
   private fail(error: ExecutionLimitError | ExecutionAbortedError): never {
     this.poisoned ??= error;

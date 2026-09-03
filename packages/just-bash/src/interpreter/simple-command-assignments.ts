@@ -14,7 +14,12 @@ import { Parser } from "../parser/parser.js";
 import type { ExecResult } from "../types.js";
 import { evaluateArithmetic } from "./arithmetic.js";
 import { applyCaseTransform, isInteger } from "./builtins/index.js";
-import { ArithmeticError, ExecutionLimitError, ExitError } from "./errors.js";
+import {
+  ArithmeticError,
+  ExecutionLimitError,
+  ExitError,
+  UnresolvedCommandError,
+} from "./errors.js";
 import { applyAssignmentTildeExpansion } from "./expansion/tilde.js";
 import {
   expandWord,
@@ -747,6 +752,7 @@ export async function computeIndexedArrayIndex(
       index = await evaluateArithmetic(ctx, arithAst.expression, false);
     } catch (e) {
       if (e instanceof ExitError) throw e;
+      if (e instanceof UnresolvedCommandError) throw e;
       if (e instanceof ArithmeticError) {
         const lineNum = ctx.state.currentLine;
         const errorMsg = `bash: line ${lineNum}: ${subscriptExpr}: ${e.message}\n`;

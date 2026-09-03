@@ -42,6 +42,7 @@ import {
   ExecutionLimitError,
   ExitError,
   PosixFatalError,
+  UnresolvedCommandError,
 } from "./interpreter/errors.js";
 import { cloneArrays } from "./interpreter/helpers/array.js";
 import {
@@ -256,6 +257,14 @@ export interface BashOptions {
     uid?: number;
     gid?: number;
   };
+  /**
+   * When true, a command-resolution miss ("command not found") aborts the
+   * entire exec call at the first miss, returning exit code 127 with the
+   * output accumulated so far. When false (default), execution continues
+   * bash-style with exit code 127 for that command. Either way, missed
+   * names are reported in BashExecResult.unresolvedCommands.
+   */
+  abortOnUnresolvedCommands?: boolean;
 }
 
 export interface ExecOptions {
@@ -319,6 +328,7 @@ export class Bash {
   private defenseInDepthConfig?: DefenseInDepthConfig | boolean;
   private coverageWriter?: FeatureCoverageWriter;
   private jsBootstrapCode?: string;
+  private abortOnUnresolvedCommands = false;
   private invokeToolFn?: (path: string, argsJson: string) => Promise<string>;
   // biome-ignore lint/suspicious/noExplicitAny: type-erased plugin storage for untyped API
   private transformPlugins: TransformPlugin<any>[] = [];
@@ -389,6 +399,8 @@ export class Bash {
     // Preserve the historical enabled default. Older supported Nodes use the
     // strongest scoped controls they expose and report loader-hook capability.
     this.defenseInDepthConfig = options.defenseInDepth ?? true;
+    this.abortOnUnresolvedCommands =
+      options.abortOnUnresolvedCommands ?? false;
 
     // Store coverage writer if provided (for fuzzing instrumentation)
     this.coverageWriter = options.coverage;
@@ -607,7 +619,11 @@ export class Bash {
     commandLine: string,
     options?: ExecOptions,
   ): Promise<BashExecResult> {
-    const executionScope = new ExecutionScope(this.limits, options?.signal);
+    const executionScope = new ExecutionScope(
+      this.limits,
+      options?.signal,
+      this.abortOnUnresolvedCommands,
+    );
     let result: BashExecResult;
     try {
       result = await this.execInScope(
@@ -641,6 +657,7 @@ export class Bash {
         exitCode: 126,
       };
     }
+    finalResult.unresolvedCommands = executionScope.unresolvedCommandNames;
     return commandLine.trim() ? this.logResult(finalResult) : finalResult;
   }
 
@@ -840,6 +857,21 @@ export class Bash {
       } catch (error) {
         // ExitError propagates from 'exit' builtin (including via eval/source)
         if (error instanceof ExitError) {
+          return finishResult({
+            stdout: error.stdout,
+            stderr: error.stderr,
+            exitCode: error.exitCode,
+            internalOutputAccounting: error.internalOutputAccounting,
+            env: mapToRecordWithExtras(this.state.env, effectiveOptions.env),
+          });
+        }
+        // UnresolvedCommandError propagates from a command-resolution miss
+        // when abortOnUnresolvedCommands is enabled. Nested executions
+        // (bash -c, command substitution) rethrow so the abort unwinds the
+        // entire outermost exec call; only the top level converts it into
+        // a result (exit 127, like the bash result for a miss).
+        if (error instanceof UnresolvedCommandError) {
+          if (execDepth > 0) throw error;
           return finishResult({
             stdout: error.stdout,
             stderr: error.stderr,

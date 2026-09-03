@@ -20,6 +20,7 @@ import {
   ErrexitError,
   ExecutionLimitError,
   ExitError,
+  UnresolvedCommandError,
   isScopeExitError,
   ReturnError,
   SubshellExitError,
@@ -207,6 +208,12 @@ async function executeSubshellBody(
       );
       return output.build(error.exitCode);
     }
+    // UnresolvedCommandError must abort the whole exec call, never be
+    // contained by the subshell boundary.
+    if (error instanceof UnresolvedCommandError) {
+      error.prependOutput(output.stdout, output.stderr);
+      throw error;
+    }
     // Apply output redirections before returning
     output.append("stderr", `${getErrorMessage(error)}\n`);
     return output.build(1);
@@ -300,7 +307,8 @@ async function executeGroupBody(
     if (
       isScopeExitError(error) ||
       error instanceof ErrexitError ||
-      error instanceof ExitError
+      error instanceof ExitError ||
+      error instanceof UnresolvedCommandError
     ) {
       error.prependOutput(output.stdout, output.stderr);
       throw error;
@@ -388,6 +396,11 @@ export async function executeUserScript(
     // ends the script and returns its status to the surrounding command list.
     if (error instanceof ExitError) {
       return result(error.stdout, error.stderr, error.exitCode);
+    }
+
+    // UnresolvedCommandError aborts the whole exec call past this boundary.
+    if (error instanceof UnresolvedCommandError) {
+      throw error;
     }
 
     // ExecutionLimitError must always propagate
