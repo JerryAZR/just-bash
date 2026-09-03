@@ -9,6 +9,15 @@
  * gates which detect symlink traversal via path comparison and return the
  * canonical path for I/O (closing the TOCTOU gap). New methods must use these
  * gates — never access the real FS directly.
+ *
+ * Concurrent modification of the underlying directory is not supported.
+ * OverlayFs does not detect changes made to the underlying directory outside
+ * the overlay while an instance is live. If such changes occur, behavior is
+ * undefined and data loss is a possible outcome — including deletion of
+ * files the overlay never saw, when applying a diff() computed against a
+ * stale view. After intentional external changes (e.g. a native run
+ * between sandbox sessions), call sync() or reset() to re-baseline before
+ * continuing.
  */
 
 import * as fs from "node:fs";
@@ -59,6 +68,58 @@ import {
 
 /** Error patterns that are safe to pass through (contain virtual paths, not real ones). */
 const OVERLAY_PASSTHROUGH_ERRORS = ["ELOOP", "EFBIG", "EPERM"] as const;
+
+/** Kind of entry recorded in an {@link OverlayWrite}. */
+export type OverlayNodeType = "file" | "directory" | "symlink";
+
+/**
+ * A single write captured in the overlay's upper layer.
+ */
+export interface OverlayWrite {
+  /**
+   * Path relative to the overlay root, with a leading slash
+   * (e.g. `"/src/app.ts"`). Join it with the host-side root directory to
+   * materialize the change.
+   */
+  path: string;
+  /** Kind of entry written. */
+  nodeType: OverlayNodeType;
+  /**
+   * File content; the symlink target (as UTF-8 bytes) for symlinks; empty
+   * for directories and for metadata-only writes.
+   */
+  content: Uint8Array;
+  /**
+   * Unix-style permission mode to apply when materializing on the host.
+   * Advisory on Windows (maps at most to the read-only attribute).
+   */
+  mode: number;
+  /** Modification time; hosts may apply it (utimes) for fidelity. */
+  mtime: Date;
+  /**
+   * When true, only metadata changed (chmod/utimes via a metacopy shadow):
+   * apply `mode` and `mtime` and never touch file content.
+   */
+  metadataOnly?: boolean;
+}
+
+/**
+ * All changes recorded in an overlay relative to its lower directory:
+ * the upper-layer write set plus the deletions (whiteouts) of lower paths.
+ *
+ * Hosts embedding just-bash use this to apply sandboxed writes to the real
+ * project directory after execution (or prompt about them) — the overlay
+ * itself never modifies disk.
+ */
+export interface OverlayDiff {
+  /** Every entry created or modified under the mount point, sorted by path. */
+  writes: OverlayWrite[];
+  /**
+   * Root-relative paths deleted during execution, sorted. Whiteout nodes
+   * never nest, so each entry is a top-most deletion covering its subtree.
+   */
+  deletions: string[];
+}
 
 export interface OverlayFsOptions {
   /**
@@ -182,6 +243,217 @@ export class OverlayFs implements IFileSystem {
    */
   getMountPoint(): string {
     return this.mountPoint;
+  }
+
+  /**
+   * Return all changes recorded in this overlay since construction (or the
+   * last {@link reset}): every write captured in the upper layer and every
+   * deletion of a lower-layer path.
+   *
+   * Paths are reported relative to the overlay root with a leading slash
+   * (e.g. `"/README.md"`), ready to join with the host-side root directory.
+   * The mount root itself is never reported, and writes outside the mount
+   * point (e.g. `/tmp` scratch files) are excluded: they have no disk
+   * counterpart to apply against.
+   *
+   * Semantics worth relying on:
+   * - **Modify** — an internal copy-up shadows the disk file; the diff
+   *   shows one write with the new content.
+   * - **Metadata-only change (chmod/utimes)** — one write with
+   *   `metadataOnly: true` and empty content; apply mode/mtime only.
+   * - **Create** — one write, including parent directories created on
+   *   demand.
+   * - **Delete then recreate** — reported as a write, not a deletion.
+   * - **`rm -rf dir`** — one deletion for `dir`, not one per child
+   *   (whiteouts never nest, so every reported deletion is top-most).
+   * - **Create then delete (never on disk)** — appears in neither list.
+   *
+   * Pure tree walk plus a synchronous existence check per whiteout and
+   * metacopy node. See the class-level policy on concurrent modification
+   * of the underlying directory.
+   */
+  diff(): OverlayDiff {
+    const writes: OverlayWrite[] = [];
+    const deletions: string[] = [];
+    for (const { path, node } of this.tree.preOrder()) {
+      const relative = this.getRelativeToMount(path);
+      if (relative === null || relative === "/") continue;
+      if (node.type === "whiteout") {
+        // Skip stale markers whose disk path is already gone.
+        if (this.existsOnRealFs(path)) deletions.push(relative);
+        continue;
+      }
+      if (node.type === "file") {
+        if (node.metacopy) {
+          // A metacopy node whose lower file vanished (out-of-band) has
+          // no meaningful content to report — skip rather than emit a
+          // phantom empty write.
+          if (!this.existsOnRealFs(path)) continue;
+          writes.push({
+            path: relative,
+            nodeType: "file",
+            content: new Uint8Array(0),
+            mode: node.mode,
+            mtime: node.mtime,
+            metadataOnly: true,
+          });
+        } else {
+          writes.push({
+            path: relative,
+            nodeType: "file",
+            content: this.coalesceFileContent(node, path),
+            mode: node.mode,
+            mtime: node.mtime,
+          });
+        }
+      } else if (node.type === "directory") {
+        writes.push({
+          path: relative,
+          nodeType: "directory",
+          content: new Uint8Array(0),
+          mode: node.mode,
+          mtime: node.mtime,
+        });
+      } else {
+        writes.push({
+          path: relative,
+          nodeType: "symlink",
+          content: new TextEncoder().encode(node.target),
+          mode: node.mode,
+          mtime: node.mtime,
+        });
+      }
+    }
+    writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    deletions.sort();
+    return { writes, deletions };
+  }
+
+  /**
+   * Reconcile the overlay with current disk state: drop every upper-layer
+   * shadow that now matches the lower directory, and clear whiteouts whose
+   * disk paths no longer exist. Entries that still differ remain pending
+   * and keep appearing in {@link diff}.
+   *
+   * After the host applies writes (or a native run rewrites files),
+   * `sync()` leaves the overlay holding "exactly the differences from disk
+   * right now": applied writes and deletions disappear, failed or
+   * conflicting ones stay visible — no per-path bookkeeping needed.
+   * Matching rules: content nodes compare bytes; metacopy nodes compare
+   * mtime everywhere and mode on POSIX (mode is advisory on Windows);
+   * directories match on existence and drop only once every child was
+   * dropped (post-order guarantees children reconcile first).
+   */
+  async sync(): Promise<void> {
+    for (const { path, node } of this.tree.postOrder()) {
+      const relative = this.getRelativeToMount(path);
+      if (relative === null || relative === "/") continue;
+      if (node.type === "whiteout") {
+        // Stale marker (deletion applied, or disk changed out-of-band):
+        // nothing left to hide.
+        if (!this.existsOnRealFs(path)) this.tree.detach(path);
+        continue;
+      }
+      if (node.type === "directory" && node.children.size > 0) {
+        // Still the container of pending children.
+        continue;
+      }
+      if (await this.nodeMatchesDisk(path, node)) {
+        this.tree.detach(path);
+      }
+    }
+  }
+
+  /**
+   * Discard all pending state: clear the upper layer so the overlay
+   * re-baselines on current disk state (trust-disk switch after native
+   * runs). Unlike {@link sync}, which keeps entries that genuinely differ
+   * from disk, `reset()` deliberately forgets them.
+   */
+  reset(): void {
+    this.tree.clear();
+    this.createMountPointDirs();
+  }
+
+  /**
+   * True when the disk entry at `path` matches the upper-layer shadow:
+   * byte-identical content for full file nodes, metadata for metacopy
+   * nodes (mtime everywhere, mode on POSIX), existence for directories,
+   * same target for symlinks.
+   */
+  private async nodeMatchesDisk(
+    path: string,
+    node: OverlayEntryNode,
+  ): Promise<boolean> {
+    if (node.type === "directory") {
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        return (await fs.promises.lstat(canonical)).isDirectory();
+      } catch {
+        return false;
+      }
+    }
+
+    if (node.type === "symlink") {
+      if (!this.allowSymlinks) return false;
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        const stat = await fs.promises.lstat(canonical);
+        if (!stat.isSymbolicLink()) return false;
+        const rawTarget = await fs.promises.readlink(canonical);
+        return this.realTargetToVirtual(path, rawTarget) === node.target;
+      } catch {
+        return false;
+      }
+    }
+
+    if (node.metacopy) {
+      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+      if (!canonical) return false;
+      try {
+        const stat = await fs.promises.lstat(canonical);
+        if (!stat.isFile()) return false;
+        if (stat.mtime.getTime() !== node.mtime.getTime()) return false;
+        if (
+          process.platform !== "win32" &&
+          (stat.mode & 0o7777) !== (node.mode & 0o7777)
+        ) {
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // Full file node: byte-for-byte comparison. Use the canonical path and
+    // O_NOFOLLOW for I/O, same TOCTOU discipline as readFileBuffer.
+    const canonical = this.resolveRealPath_(this.toRealPath(path));
+    if (!canonical) return false;
+    try {
+      const stat = await fs.promises.lstat(canonical);
+      if (!stat.isFile()) return false;
+      const flags = this.allowSymlinks
+        ? fs.constants.O_RDONLY
+        : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+      const fh = await fs.promises.open(canonical, flags);
+      let disk: Uint8Array;
+      try {
+        disk = new Uint8Array(await fh.readFile());
+      } finally {
+        await fh.close();
+      }
+      const upper = this.coalesceFileContent(node, path);
+      if (disk.byteLength !== upper.byteLength) return false;
+      for (let i = 0; i < disk.byteLength; i++) {
+        if (disk[i] !== upper[i]) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

@@ -74,7 +74,13 @@ export {
   type MountableFsOptions,
   type MountConfig,
 } from "./fs/mountable-fs/index.js";
-export { OverlayFs, type OverlayFsOptions } from "./fs/overlay-fs/index.js";
+export {
+  type OverlayDiff,
+  OverlayFs,
+  type OverlayFsOptions,
+  type OverlayNodeType,
+  type OverlayWrite,
+} from "./fs/overlay-fs/index.js";
 export {
   ReadWriteFs,
   type ReadWriteFsOptions,
