@@ -20,10 +20,10 @@ import {
   ErrexitError,
   ExecutionLimitError,
   ExitError,
-  UnresolvedCommandError,
   isScopeExitError,
   ReturnError,
   SubshellExitError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import {
   advanceFd,

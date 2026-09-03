@@ -36,6 +36,8 @@ import {
   mapToRecordWithExtras,
   mergeToNullPrototype,
 } from "./helpers/env.js";
+import { collectCommands } from "./interpreter/command-analysis.js";
+import { resolveCommand as resolveCommandHelper } from "./interpreter/command-resolution.js";
 import {
   ArithmeticError,
   ExecutionAbortedError,
@@ -45,6 +47,10 @@ import {
   UnresolvedCommandError,
 } from "./interpreter/errors.js";
 import { cloneArrays } from "./interpreter/helpers/array.js";
+import {
+  POSIX_SPECIAL_BUILTINS,
+  SHELL_BUILTINS,
+} from "./interpreter/helpers/shell-constants.js";
 import {
   buildBashopts,
   buildShellopts,
@@ -80,6 +86,7 @@ import type {
 import type {
   BashExecResult,
   Command,
+  CommandAnalysis,
   CommandRegistry,
   FeatureCoverageWriter,
   RuntimeCommand,
@@ -399,8 +406,7 @@ export class Bash {
     // Preserve the historical enabled default. Older supported Nodes use the
     // strongest scoped controls they expose and report loader-hook capability.
     this.defenseInDepthConfig = options.defenseInDepth ?? true;
-    this.abortOnUnresolvedCommands =
-      options.abortOnUnresolvedCommands ?? false;
+    this.abortOnUnresolvedCommands = options.abortOnUnresolvedCommands ?? false;
 
     // Store coverage writer if provided (for fuzzing instrumentation)
     this.coverageWriter = options.coverage;
@@ -1030,6 +1036,72 @@ export class Bash {
       ast,
       metadata,
     };
+  }
+
+  /**
+   * Statically analyze a script's command usage without executing anything.
+   *
+   * Parses `script` with the same pipeline used by exec() and walks the AST
+   * collecting every literal simple-command name — including names inside
+   * function bodies, subshells, command substitutions, and compound-command
+   * bodies. Nothing is executed and no interpreter state is modified, so
+   * this is safe to call as a pre-flight check before deciding whether to
+   * run a script in the sandbox or on the host.
+   *
+   * `unresolved` filters out names that resolve: shell builtins, commands
+   * registered on this instance (including custom commands), functions
+   * defined within the analyzed script, and executable files found on the
+   * VFS PATH (checked with the same resolver dispatch uses, against
+   * current FS/env state).
+   *
+   * Limitations: dynamically determined command names cannot be analyzed
+   * statically. `eval "..."`, names built from variables (`$cmd status`),
+   * command substitution results, aliases, and quoted or globbed names are
+   * simply not reported — neither in `commands` nor in `unresolved`.
+   * Resolution is evaluated against the state at analysis time: just-bash
+   * isolates state per exec(), so env changes and functions from earlier
+   * exec() calls are not visible here (nor at dispatch time either — the
+   * analysis matches runtime behavior). The runtime backstop is
+   * BashExecResult.unresolvedCommands.
+   *
+   * Throws ParseException on syntax errors.
+   */
+  async analyzeCommands(commandLine: string): Promise<CommandAnalysis> {
+    assertSourceWithinLimit(commandLine, this.limits.maxSourceBytes);
+    const ast = parse(normalizeScript(commandLine), {
+      maxHeredocSize: this.limits.maxHeredocSize,
+    });
+    const { commands, definedFunctions } = collectCommands(ast);
+
+    const unresolved: string[] = [];
+    for (const name of commands) {
+      if (definedFunctions.has(name)) continue;
+      if (await this.resolvesCommandForAnalysis(name)) continue;
+      unresolved.push(name);
+    }
+    return { commands, unresolved };
+  }
+
+  /**
+   * True when `name` would resolve at dispatch time: a shell builtin, a
+   * function defined on this instance, or resolvable via the VFS PATH
+   * (registered commands and executable files). Uses a throwaway hash
+   * table so analysis never mutates shell state.
+   */
+  private async resolvesCommandForAnalysis(name: string): Promise<boolean> {
+    if (POSIX_SPECIAL_BUILTINS.has(name) || SHELL_BUILTINS.has(name)) {
+      return true;
+    }
+    if (this.state.functions.has(name)) return true;
+    const resolved = await resolveCommandHelper(
+      {
+        fs: this.fs,
+        state: { ...this.state, hashTable: new Map() },
+        commands: this.commands,
+      },
+      name,
+    );
+    return resolved !== null && !("error" in resolved);
   }
 }
 

@@ -13,9 +13,7 @@ describe("unresolved command reporting", () => {
 
   it("dedupes repeated misses in first-encountered order", async () => {
     const bash = new Bash();
-    const result = await bash.exec(
-      "cmda; cmdb; cmda; cmdc; cmdb; cmda",
-    );
+    const result = await bash.exec("cmda; cmdb; cmda; cmdc; cmdb; cmda");
     expect(result.unresolvedCommands).toEqual(["cmda", "cmdb", "cmdc"]);
   });
 
@@ -51,9 +49,7 @@ describe("unresolved command reporting", () => {
 
   it("records misses even when the script handles them", async () => {
     const bash = new Bash();
-    const result = await bash.exec(
-      "nosuchcmd || echo fallback; echo rc=$?",
-    );
+    const result = await bash.exec("nosuchcmd || echo fallback; echo rc=$?");
     expect(result.stdout).toBe("fallback\nrc=0\n");
     expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
   });
@@ -86,9 +82,7 @@ describe("unresolved command reporting", () => {
 describe("abortOnUnresolvedCommands", () => {
   it("aborts at the first miss with 127 and preserves output so far", async () => {
     const bash = new Bash({ abortOnUnresolvedCommands: true });
-    const result = await bash.exec(
-      "echo before; nosuchcmd; echo after",
-    );
+    const result = await bash.exec("echo before; nosuchcmd; echo after");
     expect(result.exitCode).toBe(127);
     expect(result.stdout).toBe("before\n");
     expect(result.stderr).toBe("bash: nosuchcmd: command not found\n");
@@ -97,9 +91,7 @@ describe("abortOnUnresolvedCommands", () => {
 
   it("unwinds past || handlers", async () => {
     const bash = new Bash({ abortOnUnresolvedCommands: true });
-    const result = await bash.exec(
-      "nosuchcmd || echo handled; echo after",
-    );
+    const result = await bash.exec("nosuchcmd || echo handled; echo after");
     expect(result.exitCode).toBe(127);
     expect(result.stdout).toBe("");
     expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
@@ -117,9 +109,7 @@ describe("abortOnUnresolvedCommands", () => {
 
   it("nested bash -c abort unwinds the outer exec", async () => {
     const bash = new Bash({ abortOnUnresolvedCommands: true });
-    const result = await bash.exec(
-      'echo top; bash -c "nosuchcmd"; echo after',
-    );
+    const result = await bash.exec('echo top; bash -c "nosuchcmd"; echo after');
     expect(result.exitCode).toBe(127);
     expect(result.stdout).toBe("top\n");
     expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);

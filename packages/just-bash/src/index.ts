@@ -142,6 +142,7 @@ export type {
 export type {
   BashExecResult,
   Command,
+  CommandAnalysis,
   CommandContext,
   ExecResult,
   IFileSystem,

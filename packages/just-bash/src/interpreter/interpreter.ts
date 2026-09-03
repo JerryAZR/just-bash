@@ -74,11 +74,11 @@ import {
   ExecutionAbortedError,
   ExecutionLimitError,
   ExitError,
-  UnresolvedCommandError,
   GlobError,
   NounsetError,
   PosixFatalError,
   ReturnError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import { expandWord, expandWordWithGlob } from "./expansion.js";
 import { advanceFd } from "./fd-table.js";

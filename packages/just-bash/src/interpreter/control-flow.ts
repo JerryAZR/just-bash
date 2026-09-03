@@ -30,10 +30,10 @@ import {
   ErrexitError,
   ExecutionLimitError,
   ExitError,
-  UnresolvedCommandError,
   GlobError,
   isScopeExitError,
   SubshellExitError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import {
   escapeGlobChars,

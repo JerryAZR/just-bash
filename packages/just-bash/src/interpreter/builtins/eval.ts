@@ -11,8 +11,8 @@ import {
   BreakError,
   ContinueError,
   ExitError,
-  UnresolvedCommandError,
   ReturnError,
+  UnresolvedCommandError,
 } from "../errors.js";
 import { failure, OK } from "../helpers/result.js";
 import type { InterpreterContext } from "../types.js";
