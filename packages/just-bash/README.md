@@ -514,6 +514,50 @@ await env.exec('sqlite3 data.db "SELECT * FROM users"');
 
 **Note:** SQLite is not available in browser environments. Queries run in a worker thread with a configurable timeout (30 seconds in the default `normal` profile and 5 seconds in the opt-in `hardened` profile) to prevent runaway queries from blocking execution.
 
+## Detecting Unsupported Commands
+
+Agent harnesses need to know when a script uses commands the sandbox doesn't implement — anything the sandbox can't run should be *visible* instead of silently wrong. Three layers, all opt-in except the first:
+
+**Runtime reporting (always on).** Every `exec()` result lists command names that failed resolution, captured from anywhere in the script — subshells, pipelines, command substitutions, nested `bash -c`:
+
+```typescript
+const result = await env.exec("grep -r foo src/ && git status");
+result.unresolvedCommands; // ["git"]
+result.exitCode;           // 0 — execution continued bash-style (the miss itself exited 127)
+```
+
+**Static pre-flight.** `analyzeCommands()` parses a script and reports which literal command names would fail resolution, without executing anything or modifying state. Useful for skipping doomed scripts before they cause side effects:
+
+```typescript
+const analysis = await env.analyzeCommands("grep -r foo src/ && git status");
+analysis.commands;    // ["grep", "git"]
+analysis.unresolved;  // ["git"]
+```
+
+Resolution mirrors the runtime resolver: builtins, registered and custom commands, functions defined in the script, and executable files on the VFS PATH all count as resolved. Dynamically determined names (`$cmd status`, `eval "..."`, globs, quotes) can't be analyzed statically and appear in neither list — runtime reporting is the backstop.
+
+**Fail-fast abort.** With `abortOnUnresolvedCommands`, the script stops at the first miss instead of continuing bash-style, returning exit code 127 with the output accumulated so far:
+
+```typescript
+const env = new Bash({ abortOnUnresolvedCommands: true });
+const result = await env.exec("echo done; git status; echo unreachable");
+result.exitCode;           // 127
+result.stdout;             // "done\n"
+result.unresolvedCommands; // ["git"]
+```
+
+A typical harness runs a script entirely in the sandbox or entirely natively:
+
+```typescript
+const analysis = await env.analyzeCommands(script);
+if (analysis.unresolved.length === 0) {
+  const result = await env.exec(script);
+  if (result.unresolvedCommands.length > 0) rerunNatively(script);
+} else {
+  rerunNatively(script);
+}
+```
+
 ## AST Transform Plugins
 
 Parse bash scripts into an AST, transform them, and serialize back to bash. Good for instrumenting scripts (e.g., capturing per-command stdout/stderr) or extracting metadata before execution.

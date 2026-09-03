@@ -12,6 +12,7 @@ import {
   ContinueError,
   ExitError,
   ReturnError,
+  UnresolvedCommandError,
 } from "../errors.js";
 import { failure, OK } from "../helpers/result.js";
 import type { InterpreterContext } from "../types.js";
@@ -78,7 +79,8 @@ export async function handleEval(
       error instanceof BreakError ||
       error instanceof ContinueError ||
       error instanceof ReturnError ||
-      error instanceof ExitError
+      error instanceof ExitError ||
+      error instanceof UnresolvedCommandError
     ) {
       throw error;
     }

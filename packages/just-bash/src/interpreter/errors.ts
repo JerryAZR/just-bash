@@ -237,6 +237,26 @@ export class ExecutionAbortedError extends ControlFlowError {
 }
 
 /**
+ * Error thrown when abortOnUnresolvedCommands is enabled and a command name
+ * fails resolution ("command not found"). Unwinds the entire exec call —
+ * past `||` handlers, functions, and subshells — carrying the output
+ * accumulated so far. Surfaces as exit code 127, matching the bash result
+ * for a resolution miss.
+ */
+export class UnresolvedCommandError extends ControlFlowError {
+  readonly name = "UnresolvedCommandError";
+  readonly exitCode = 127;
+
+  constructor(
+    public readonly commandName: string,
+    stdout: string = "",
+    stderr: string = "",
+  ) {
+    super(`unresolved command: ${commandName}`, stdout, stderr);
+  }
+}
+
+/**
  * Error thrown when break/continue is called in a subshell that was
  * spawned from within a loop context. Causes the subshell to exit cleanly.
  */

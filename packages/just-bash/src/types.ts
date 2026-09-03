@@ -61,10 +61,39 @@ export interface ExecResult {
   };
 }
 
+/**
+ * Result of statically analyzing a script's command usage without
+ * executing it. Produced by Bash.analyzeCommands().
+ */
+export interface CommandAnalysis {
+  /**
+   * Every literal simple-command name in the script, deduplicated in
+   * first-encountered order (including names inside function bodies,
+   * subshells, command substitutions, and compound-command bodies).
+   */
+  commands: string[];
+  /**
+   * The subset of `commands` that would fail command resolution at
+   * dispatch time: not a builtin, not a registered command, not a
+   * function defined on this instance or within the script itself, and
+   * not an executable file found on the VFS PATH.
+   */
+  unresolved: string[];
+}
+
 /** Result from BashEnv.exec() - always includes env */
 export interface BashExecResult extends ExecResult {
   env: Record<string, string>;
   metadata?: Record<string, unknown>;
+  /**
+   * Command names that failed resolution ("command not found") during this
+   * exec() call, deduplicated in first-encountered order. Captured from
+   * anywhere in the script — subshells, pipelines, command substitutions,
+   * nested `bash -c`. Set by Bash.exec(); empty when every command
+   * resolved. See BashOptions.abortOnUnresolvedCommands for fail-fast
+   * behavior.
+   */
+  unresolvedCommands?: string[];
 }
 
 /** Options for exec calls within commands (internal API) */

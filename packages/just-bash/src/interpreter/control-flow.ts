@@ -33,6 +33,7 @@ import {
   GlobError,
   isScopeExitError,
   SubshellExitError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import {
   escapeGlobChars,
@@ -154,6 +155,7 @@ async function executeBoundedStatements(
       isScopeExitError(error) ||
       error instanceof ErrexitError ||
       error instanceof ExitError ||
+      error instanceof UnresolvedCommandError ||
       error instanceof ExecutionLimitError ||
       error instanceof SubshellExitError
     ) {

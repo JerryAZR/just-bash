@@ -78,6 +78,7 @@ import {
   NounsetError,
   PosixFatalError,
   ReturnError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import { expandWord, expandWordWithGlob } from "./expansion.js";
 import { advanceFd } from "./fd-table.js";
@@ -254,7 +255,10 @@ export class Interpreter {
       } catch (error) {
         // ExitError always propagates up to terminate the script
         // This allows 'eval exit 42' and 'source exit.sh' to exit properly
-        if (error instanceof ExitError) {
+        if (
+          error instanceof ExitError ||
+          error instanceof UnresolvedCommandError
+        ) {
           error.prependOutput(output.stdout, output.stderr);
           throw error;
         }

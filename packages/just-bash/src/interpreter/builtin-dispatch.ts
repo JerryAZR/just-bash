@@ -64,6 +64,7 @@ import {
   ExecutionAbortedError,
   ExecutionLimitError,
   ExitError,
+  UnresolvedCommandError,
 } from "./errors.js";
 import { callFunction } from "./functions.js";
 import { setArrayElement } from "./helpers/array.js";
@@ -771,12 +772,24 @@ export async function executeExternalCommand(
     useDefaultPath ? defaultPath : undefined,
   );
   if (!resolved) {
+    // Command-resolution miss: record it on the shared execution scope so
+    // hosts can see everything the sandbox could not run, and abort the
+    // whole execution when abortOnUnresolvedCommands is enabled.
+    ctx.executionScope.recordUnresolvedCommand(commandName);
+    const abort = ctx.executionScope.abortOnUnresolvedCommands;
     // Check if this is a browser-excluded command for a more helpful error
     if (isBrowserExcludedCommand(commandName)) {
-      return failure(
+      const message =
         `bash: ${commandName}: command not available in browser environments. ` +
-          `Exclude '${commandName}' from your commands or use the Node.js bundle.\n`,
-        127,
+        `Exclude '${commandName}' from your commands or use the Node.js bundle.\n`;
+      if (abort) throw new UnresolvedCommandError(commandName, "", message);
+      return failure(message, 127);
+    }
+    if (abort) {
+      throw new UnresolvedCommandError(
+        commandName,
+        "",
+        `bash: ${commandName}: command not found\n`,
       );
     }
     return failure(`bash: ${commandName}: command not found\n`, 127);
@@ -994,6 +1007,11 @@ export async function executeExternalCommand(
     }
     // Security violations must propagate to top-level error handling
     if (error instanceof SecurityViolationError) {
+      throw error;
+    }
+    // Abort-on-unresolved must unwind the whole exec, not degrade to a
+    // per-command failure result.
+    if (error instanceof UnresolvedCommandError) {
       throw error;
     }
     return failure(
