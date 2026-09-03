@@ -526,6 +526,11 @@ export class OverlayFs implements IFileSystem {
    * overwriting an upper-layer file, the lower file's mode when shadowing
    * a lower-layer file (POSIX O_TRUNC preserves mode), DEFAULT_FILE_MODE
    * for genuinely new files (including recreate-after-delete).
+   *
+   * The lower-layer stat is POSIX-only: Windows modes are synthesized
+   * (0o666/0o444 from the read-only attribute, exec bits from the file
+   * extension) and nothing in the overlay enforces them, so the syscall
+   * would buy fiction.
    */
   private async inheritedMode(normalized: string): Promise<number> {
     const existing = this.entryAt(normalized);
@@ -534,6 +539,9 @@ export class OverlayFs implements IFileSystem {
     }
     if (existing?.type === "directory") {
       return DEFAULT_FILE_MODE; // attach() will reject with EISDIR
+    }
+    if (process.platform === "win32") {
+      return DEFAULT_FILE_MODE;
     }
     try {
       const st = await this.stat(normalized);
