@@ -6,8 +6,9 @@
  */
 
 import type { ScriptNode } from "../../ast/types.js";
+import { rethrowFatalExecutionError } from "../../fatal-execution-error.js";
 import { Parser } from "../../parser/parser.js";
-import { ExecutionLimitError, ExitError } from "../errors.js";
+import { ExitError } from "../errors.js";
 import { cloneArrays } from "../helpers/array.js";
 import type { InterpreterContext } from "../types.js";
 import { escapeGlobChars } from "./glob-escape.js";
@@ -146,9 +147,10 @@ async function executeCommandSubstitutionFromString(
     ctx.state.cwd = savedCwd;
     ctx.state.bashPid = savedBashPid;
     ctx.state.suppressVerbose = savedSuppressVerbose;
-    if (error instanceof ExecutionLimitError) {
-      throw error;
-    }
+    // Tier-1 fatal errors (limits, aborts, security violations, and the
+    // abort-on-unresolved unwind) must never degrade to an empty
+    // substitution.
+    rethrowFatalExecutionError(error);
     if (error instanceof ExitError) {
       ctx.state.lastExitCode = error.exitCode;
       ctx.state.env.set("?", String(error.exitCode));

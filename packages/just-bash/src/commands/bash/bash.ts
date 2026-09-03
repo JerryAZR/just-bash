@@ -61,6 +61,9 @@ export const bashCommand: RuntimeCommand = {
     try {
       const fullPath = ctx.fs.resolvePath(ctx.cwd, scriptPath);
       const scriptContent = await ctx.fs.readFile(fullPath);
+      // Do NOT await executeScript inside this try: exec rejections
+      // (fatal execution errors like the abort-on-unresolved unwind) must
+      // propagate, not degrade into "No such file or directory".
       return executeScript(scriptContent, scriptPath, scriptArgs, ctx);
     } catch {
       return {
@@ -115,6 +118,9 @@ export const shCommand: RuntimeCommand = {
     try {
       const fullPath = ctx.fs.resolvePath(ctx.cwd, scriptPath);
       const scriptContent = await ctx.fs.readFile(fullPath);
+      // Do NOT await executeScript inside this try: exec rejections
+      // (fatal execution errors like the abort-on-unresolved unwind) must
+      // propagate, not degrade into "No such file or directory".
       return executeScript(scriptContent, scriptPath, scriptArgs, ctx);
     } catch {
       return {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../Bash.js";
+import {
+  POSIX_SPECIAL_BUILTINS,
+  SHELL_BUILTINS,
+} from "./helpers/shell-constants.js";
 
 describe("analyzeCommands", () => {
   it("collects literal command names and reports unresolved ones", async () => {
@@ -105,5 +109,62 @@ describe("analyzeCommands", () => {
   it("throws ParseException on syntax errors", async () => {
     const bash = new Bash();
     await expect(bash.analyzeCommands("if true; then")).rejects.toThrow();
+  });
+
+  it("collects commands inside redirection target substitutions", async () => {
+    const bash = new Bash();
+    const analysis = await bash.analyzeCommands("cat > $(missingcmd)");
+    expect(analysis.commands).toEqual(["cat", "missingcmd"]);
+    expect(analysis.unresolved).toEqual(["missingcmd"]);
+  });
+
+  it("treats script-defined alias names as resolved", async () => {
+    const bash = new Bash();
+    const analysis = await bash.analyzeCommands("alias ll='ls -l'; ll /tmp");
+    expect(analysis.commands).toEqual(["alias", "ll"]);
+    expect(analysis.unresolved).toEqual([]);
+  });
+
+  it("agrees with runtime dispatch for every builtin-looking name", async () => {
+    // Parity pin: for each name in the builtin display sets, runtime
+    // dispatch and static analysis must agree on resolvability. Any drift
+    // (a builtin implemented later, or a set edited without the other
+    // being updated) fails this test loudly.
+    const bash = new Bash();
+    const names = [...POSIX_SPECIAL_BUILTINS, ...SHELL_BUILTINS];
+    const divergent: string[] = [];
+    for (const name of names) {
+      const runtime = await bash.exec(name);
+      const runtimeMissing = runtime.stderr.includes("command not found");
+      const analysis = await bash.analyzeCommands(name);
+      const analysisMissing = analysis.unresolved.includes(name);
+      if (runtimeMissing !== analysisMissing) {
+        divergent.push(
+          `${name} (runtime ${runtimeMissing ? "missing" : "resolves"}, analysis ${analysisMissing ? "missing" : "resolves"})`,
+        );
+      }
+    }
+    expect(divergent).toEqual([]);
+  });
+
+  it("does not see substitutions in [[ ]] conditions (documented limitation)", async () => {
+    // Conditional-command test expressions are not walked: a substitution
+    // there does execute at runtime, and the runtime backstop
+    // (unresolvedCommands) is the documented answer for this blind spot.
+    const bash = new Bash();
+    const analysis = await bash.analyzeCommands("[[ -n $(missingcmd) ]]");
+    expect(analysis.commands).toEqual([]);
+    expect(analysis.unresolved).toEqual([]);
+  });
+
+  it("resolves functions regardless of definition order (documented divergence)", async () => {
+    // Static collection is order-insensitive; dispatch is not. `f` fails
+    // at runtime here (defined after use) but analysis reports it
+    // resolved. Pinned so the divergence is deliberate, not accidental.
+    const bash = new Bash();
+    const analysis = await bash.analyzeCommands("f; f() { :; }");
+    expect(analysis.unresolved).toEqual([]);
+    const runtime = await bash.exec("f; f() { :; }");
+    expect(runtime.stderr).toContain("f: command not found");
   });
 });

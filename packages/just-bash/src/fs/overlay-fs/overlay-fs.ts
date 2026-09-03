@@ -898,18 +898,21 @@ export class OverlayFs implements IFileSystem {
       throw new Error(`ENOTDIR: not a directory, append '${path}'`);
     }
 
-    // Whiteout at the exact path: no lower-layer content to append to
-    // (recreate-after-delete starts empty). Otherwise read through — this
-    // resolves symlinks and reads lower-layer content like before.
+    // Read through for the current content — this resolves symlinks and
+    // reads lower-layer content. A whiteout at the exact path surfaces as
+    // ENOENT here (recreate-after-delete starts empty), as does a plain
+    // missing file (append creates it). Every other read failure (EFBIG
+    // on an oversized lower file, ELOOP, EACCES) must propagate: starting
+    // from an empty buffer would silently truncate the file, and diff()
+    // would report that truncated content for the host to apply to disk.
     let existingBuffer: Uint8Array;
-    if (result.kind === "found" && result.node.type === "whiteout") {
-      existingBuffer = new Uint8Array(0);
-    } else {
-      try {
-        existingBuffer = await this.readFileBuffer(normalized);
-      } catch {
-        existingBuffer = new Uint8Array(0);
+    try {
+      existingBuffer = await this.readFileBuffer(normalized);
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith("ENOENT")) {
+        throw e;
       }
+      existingBuffer = new Uint8Array(0);
     }
 
     this.ensureParentDirs(normalized);
@@ -1207,11 +1210,15 @@ export class OverlayFs implements IFileSystem {
         if (!this.allowSymlinks) {
           const dirStat = await fs.promises.lstat(canonical);
           if (dirStat.isSymbolicLink()) {
-            // Treat as non-existent — don't leak real-FS entries
+            // Treat as non-existent — don't leak real-FS entries. The
+            // error must carry the code: the catch below classifies by
+            // .code, and a plain Error would be mislabeled as EIO.
             if (!dirNode) {
-              throw new Error(
+              const err = new Error(
                 `ENOENT: no such file or directory, scandir '${path}'`,
-              );
+              ) as NodeJS.ErrnoException;
+              err.code = "ENOENT";
+              throw err;
             }
             return entriesMap;
           }

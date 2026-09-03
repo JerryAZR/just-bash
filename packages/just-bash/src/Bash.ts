@@ -50,6 +50,7 @@ import { cloneArrays } from "./interpreter/helpers/array.js";
 import {
   POSIX_SPECIAL_BUILTINS,
   SHELL_BUILTINS,
+  UNIMPLEMENTED_BUILTIN_NAMES,
 } from "./interpreter/helpers/shell-constants.js";
 import {
   buildBashopts,
@@ -1056,12 +1057,20 @@ export class Bash {
    *
    * Limitations: dynamically determined command names cannot be analyzed
    * statically. `eval "..."`, names built from variables (`$cmd status`),
-   * command substitution results, aliases, and quoted or globbed names are
-   * simply not reported — neither in `commands` nor in `unresolved`.
-   * Resolution is evaluated against the state at analysis time: just-bash
-   * isolates state per exec(), so env changes and functions from earlier
-   * exec() calls are not visible here (nor at dispatch time either — the
-   * analysis matches runtime behavior). The runtime backstop is
+   * command substitution results, and quoted or globbed names are simply
+   * not reported — neither in `commands` nor in `unresolved`. Aliases
+   * defined literally in the analyzed script (`alias name=...`) are
+   * treated as resolved, mirroring dispatch's alias expansion; aliases
+   * from other sources are not visible. Command substitutions inside
+   * [[ ]] test expressions and arithmetic are not walked (they do execute
+   * at runtime — the runtime backstop covers that blind spot). Resolution
+   * is evaluated against the state at analysis time: just-bash isolates
+   * state per exec(), so env changes and functions from earlier exec()
+   * calls are not visible here (nor at dispatch time either — the
+   * analysis matches runtime behavior). Function definitions are
+   * collected order-insensitively, so a function used before its
+   * definition reports resolved while dispatch would 127 — same static/
+   * dynamic divide. The runtime backstop is
    * BashExecResult.unresolvedCommands.
    *
    * Throws ParseException on syntax errors.
@@ -1071,11 +1080,11 @@ export class Bash {
     const ast = parse(normalizeScript(commandLine), {
       maxHeredocSize: this.limits.maxHeredocSize,
     });
-    const { commands, definedFunctions } = collectCommands(ast);
+    const { commands, definedFunctions, definedAliases } = collectCommands(ast);
 
     const unresolved: string[] = [];
     for (const name of commands) {
-      if (definedFunctions.has(name)) continue;
+      if (definedFunctions.has(name) || definedAliases.has(name)) continue;
       if (await this.resolvesCommandForAnalysis(name)) continue;
       unresolved.push(name);
     }
@@ -1089,7 +1098,13 @@ export class Bash {
    * table so analysis never mutates shell state.
    */
   private async resolvesCommandForAnalysis(name: string): Promise<boolean> {
-    if (POSIX_SPECIAL_BUILTINS.has(name) || SHELL_BUILTINS.has(name)) {
+    // Display-set membership is not resolvability: names in
+    // UNIMPLEMENTED_BUILTIN_NAMES have no dispatch handler and fail 127
+    // at runtime, so analysis must not report them resolved.
+    if (
+      (POSIX_SPECIAL_BUILTINS.has(name) || SHELL_BUILTINS.has(name)) &&
+      !UNIMPLEMENTED_BUILTIN_NAMES.has(name)
+    ) {
       return true;
     }
     if (this.state.functions.has(name)) return true;

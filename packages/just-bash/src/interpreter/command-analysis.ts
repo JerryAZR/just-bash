@@ -26,11 +26,14 @@ export interface CollectedCommands {
   commands: string[];
   /** Names of functions defined in the analyzed script, deduplicated. */
   definedFunctions: Set<string>;
+  /** Names of aliases defined in the analyzed script (`alias name=...`). */
+  definedAliases: Set<string>;
 }
 
 interface Collector {
   commands: Set<string>;
   definedFunctions: Set<string>;
+  definedAliases: Set<string>;
 }
 
 /**
@@ -44,11 +47,13 @@ export function collectCommands(script: ScriptNode): CollectedCommands {
   const collector: Collector = {
     commands: new Set(),
     definedFunctions: new Set(),
+    definedAliases: new Set(),
   };
   walkScript(script, collector);
   return {
     commands: [...collector.commands],
     definedFunctions: collector.definedFunctions,
+    definedAliases: collector.definedAliases,
   };
 }
 
@@ -62,6 +67,21 @@ function literalCommandName(word: WordNode): string | null {
     return word.parts[0].value;
   }
   return null;
+}
+
+/**
+ * Collect alias names defined by an `alias name=value ...` invocation.
+ * The name must be a literal prefix up to '='; the value may be quoted or
+ * compound and is irrelevant here. Non-assignment forms (`alias`,
+ * `alias name`) define nothing.
+ */
+function collectAliasDefinitions(args: WordNode[], c: Collector): void {
+  for (const arg of args) {
+    const first = arg.parts[0];
+    if (first?.type !== "Literal") continue;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(first.value);
+    if (match) c.definedAliases.add(match[1]);
+  }
 }
 
 function walkScript(node: ScriptNode, c: Collector): void {
@@ -87,7 +107,13 @@ function walkCommand(node: CommandNode, c: Collector): void {
     case "SimpleCommand":
       if (node.name) {
         const name = literalCommandName(node.name);
-        if (name) c.commands.add(name);
+        if (name) {
+          c.commands.add(name);
+          // `alias name=value` defines an alias; dispatch expands those
+          // names, so analysis must treat them as resolvable (symmetric
+          // with function definitions).
+          if (name === "alias") collectAliasDefinitions(node.args, c);
+        }
         walkWordParts(node.name.parts, c);
       }
       for (const arg of node.args) {
@@ -99,6 +125,15 @@ function walkCommand(node: CommandNode, c: Collector): void {
           for (const w of assign.array) {
             walkWordParts(w.parts, c);
           }
+        }
+      }
+      // Redirection targets and heredoc bodies can contain substitutions
+      // that execute at runtime (`cat > $(cmd)`, `cat <<EOF ... EOF`).
+      for (const redir of node.redirections) {
+        if (redir.target.type === "Word") {
+          walkWordParts(redir.target.parts, c);
+        } else if (redir.target.type === "HereDoc" && !redir.target.quoted) {
+          walkWordParts(redir.target.content.parts, c);
         }
       }
       break;

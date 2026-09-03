@@ -126,3 +126,34 @@ export const SHELL_BUILTINS: Set<string> = new Set([
   "builtin",
   "caller",
 ]);
+
+/**
+ * Names in the builtin display sets that have NO implementation: dispatch
+ * has no handler for them, so at runtime they fall through to external
+ * resolution and fail with "command not found" (exit 127). Real bash
+ * implements these; just-bash does not (yet).
+ *
+ * Membership in POSIX_SPECIAL_BUILTINS / SHELL_BUILTINS is about DISPLAY
+ * (type, command -v) and POSIX mode behavior — not about resolvability.
+ * Static analysis (Bash.analyzeCommands) subtracts this set so its
+ * results match dispatch. Keep this honest: the parity test in
+ * command-analysis.test.ts runs every display-set name through both
+ * runtime dispatch and analysis and fails on any divergence — both when
+ * a name here gets implemented (remove it) and when a new unimplemented
+ * name joins a display set (add it).
+ */
+export const UNIMPLEMENTED_BUILTIN_NAMES: ReadonlySet<string> = new Set([
+  "bg",
+  "caller",
+  "disown",
+  "enable",
+  "fc",
+  "fg",
+  "jobs",
+  "kill",
+  "suspend",
+  "times",
+  "trap",
+  "ulimit",
+  "umask",
+]);

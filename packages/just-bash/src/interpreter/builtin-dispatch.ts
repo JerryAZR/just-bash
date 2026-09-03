@@ -11,13 +11,11 @@ import {
   createCommandExecutionBudget,
   type ExecutionScope,
 } from "../execution-scope.js";
+import { rethrowFatalExecutionError } from "../fatal-execution-error.js";
 import { getFileSystemIdentity, isFileSystemIdentity } from "../fs/identity.js";
 import { sanitizeErrorMessage } from "../fs/sanitize-error.js";
 import { awaitWithDefenseContext } from "../security/defense-context.js";
-import {
-  DefenseInDepthBox,
-  SecurityViolationError,
-} from "../security/defense-in-depth-box.js";
+import { DefenseInDepthBox } from "../security/defense-in-depth-box.js";
 import { _Proxy } from "../security/trusted-globals.js";
 import { _clearFiniteTimeout, _setTimeoutIfFinite } from "../timers.js";
 import type {
@@ -998,22 +996,9 @@ export async function executeExternalCommand(
         (stdinAccessed ? stdin.length : 0),
     };
   } catch (error) {
-    // ExecutionLimitError must propagate - these are safety limits
-    if (error instanceof ExecutionLimitError) {
-      throw error;
-    }
-    if (error instanceof ExecutionAbortedError) {
-      throw error;
-    }
-    // Security violations must propagate to top-level error handling
-    if (error instanceof SecurityViolationError) {
-      throw error;
-    }
-    // Abort-on-unresolved must unwind the whole exec, not degrade to a
-    // per-command failure result.
-    if (error instanceof UnresolvedCommandError) {
-      throw error;
-    }
+    // Tier-1 fatal errors (execution limits, host aborts, security
+    // violations, abort-on-unresolved) must propagate.
+    rethrowFatalExecutionError(error);
     return failure(
       `${commandName}: ${sanitizeErrorMessage(getErrorMessage(error))}\n`,
     );

@@ -5,11 +5,12 @@
  * (for, c-style for, while, until).
  */
 
+import { isFatalExecutionError } from "../../fatal-execution-error.js";
 import {
   BreakError,
   ContinueError,
+  ControlFlowError,
   ErrexitError,
-  ExecutionLimitError,
   ExitError,
   ReturnError,
 } from "../errors.js";
@@ -71,12 +72,14 @@ export function handleLoopError(
   }
 
   if (
+    isFatalExecutionError(error) ||
     error instanceof ReturnError ||
     error instanceof ErrexitError ||
-    error instanceof ExitError ||
-    error instanceof ExecutionLimitError
+    error instanceof ExitError
   ) {
-    error.prependOutput(stdout, stderr);
+    if (error instanceof ControlFlowError) {
+      error.prependOutput(stdout, stderr);
+    }
     return { action: "rethrow", stdout, stderr, error };
   }
 

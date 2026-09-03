@@ -123,3 +123,60 @@ describe("abortOnUnresolvedCommands", () => {
     expect(result.unresolvedCommands).toEqual([]);
   });
 });
+
+describe("abort unwind coverage", () => {
+  const abortBash = () => new Bash({ abortOnUnresolvedCommands: true });
+
+  it.each([
+    ["for loop", "for i in 1 2 3; do nosuchcmd; done; echo after"],
+    ["while loop", "while true; do nosuchcmd; done; echo after"],
+    [
+      "until loop",
+      "i=0; until [ $i -ge 3 ]; do nosuchcmd; i=$((i+1)); done; echo after",
+    ],
+    ["C-style for", "for ((i=0; i<3; i++)); do nosuchcmd; done; echo after"],
+    ["if condition", "if nosuchcmd; then echo x; fi; echo after"],
+    [
+      "while condition",
+      "i=0; while nosuchcmd; do i=$((i+1)); done; echo after",
+    ],
+    ["&& list", "nosuchcmd && echo x; echo after"],
+    ["pipeline", "nosuchcmd | cat; echo after"],
+    ["command substitution", "x=$(nosuchcmd); echo after"],
+    ["substitution in argument", "echo before $(nosuchcmd) middle; echo after"],
+  ])("aborts out of %s", async (_label, script) => {
+    const result = await abortBash().exec(script);
+    expect(result.exitCode).toBe(127);
+    expect(result.stdout).not.toContain("after");
+    expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
+  });
+
+  it("aborts out of command substitution inside extglob patterns", async () => {
+    const result = await abortBash().exec(
+      "shopt -s extglob; echo @($(nosuchcmd)|x); echo after",
+    );
+    expect(result.exitCode).toBe(127);
+    expect(result.stdout).not.toContain("after");
+    expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
+  });
+
+  it("preserves stderr accumulated before the miss", async () => {
+    const result = await abortBash().exec("echo oops >&2; nosuchcmd");
+    expect(result.exitCode).toBe(127);
+    expect(result.stderr).toBe("oops\nbash: nosuchcmd: command not found\n");
+  });
+
+  it("records misses across nested bash -c scopes in encounter order", async () => {
+    const bash = new Bash();
+    const result = await bash.exec("nosuch1; bash -c 'nosuch2'; nosuch1");
+    expect(result.exitCode).toBe(127);
+    expect(result.unresolvedCommands).toEqual(["nosuch1", "nosuch2"]);
+  });
+
+  it("a handled miss still exits 127 for that command", async () => {
+    const bash = new Bash();
+    const result = await bash.exec("nosuchcmd; echo status=$?");
+    expect(result.stdout).toBe("status=127\n");
+    expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
+  });
+});
