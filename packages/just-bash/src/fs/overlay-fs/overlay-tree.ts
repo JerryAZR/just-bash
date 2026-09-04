@@ -95,6 +95,42 @@ function fileBytes(node: OverlayFileNode): number {
   return bytes;
 }
 
+/** Byte size of a file node (base content + append chunks). */
+export function fileNodeBytes(node: OverlayFileNode): number {
+  return fileBytes(node);
+}
+
+/**
+ * Merge a file node's base content and append chunks into one buffer,
+ * compacting the node in place. Total byte accounting is unchanged (the
+ * chunk bytes move into content), so the retainedBytes invariant holds.
+ */
+export function coalesceFileContent(
+  node: OverlayFileNode,
+  virtualPath: string,
+): Uint8Array {
+  if (!node.appendChunks || node.appendChunks.length === 0) {
+    return node.content;
+  }
+  const total = node.appendChunks.reduce(
+    (sum, chunk) => sum + chunk.byteLength,
+    node.content.byteLength,
+  );
+  if (!Number.isSafeInteger(total)) {
+    throw new Error(`EFBIG: file too large, read '${virtualPath}'`);
+  }
+  const combined = new Uint8Array(total);
+  combined.set(node.content);
+  let offset = node.content.byteLength;
+  for (const chunk of node.appendChunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  node.content = combined;
+  node.appendChunks = undefined;
+  return combined;
+}
+
 /** Byte cost of a single node, excluding any directory children. */
 function nodeBytes(node: OverlayNode | undefined): number {
   if (!node || node.type !== "file") return 0;
@@ -330,6 +366,8 @@ export class OverlayTree {
    * which bottom-up drops are safe. Whiteouts are included.
    */
   *postOrder(): Generator<{ path: string; node: OverlayNode }> {
+    // Materialized eagerly so callers may detach nodes during iteration
+    // (sync() relies on this — do not "optimize" into a lazy generator).
     const out: { path: string; node: OverlayNode }[] = [];
     const stack: { path: string; node: OverlayNode }[] = [
       { path: "/", node: this.rootNode },

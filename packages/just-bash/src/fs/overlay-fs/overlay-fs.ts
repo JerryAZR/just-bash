@@ -60,6 +60,8 @@ import {
   validateRootDirectory,
 } from "../real-fs-utils.js";
 import {
+  coalesceFileContent,
+  fileNodeBytes,
   type OverlayDirNode,
   type OverlayEntryNode,
   type OverlayFileNode,
@@ -301,7 +303,7 @@ export class OverlayFs implements IFileSystem {
           writes.push({
             path: relative,
             nodeType: "file",
-            content: this.coalesceFileContent(node, path),
+            content: coalesceFileContent(node, path),
             mode: node.mode,
             mtime: node.mtime,
           });
@@ -381,51 +383,57 @@ export class OverlayFs implements IFileSystem {
    * nodes (mtime everywhere, mode on POSIX), existence for directories,
    * same target for symlinks.
    */
+  /**
+   * lstat the lower-layer counterpart of a virtual path via parent-based
+   * canonical resolution (the path itself may not exist as a real file,
+   * e.g. an upper symlink shadow). Returns null when the path has no
+   * real-FS counterpart or the lstat fails.
+   */
+  private async lstatLower(
+    path: string,
+  ): Promise<{ canonical: string; stat: fs.Stats } | null> {
+    const canonical = this.resolveRealPathParent_(this.toRealPath(path));
+    if (!canonical) return null;
+    try {
+      return { canonical, stat: await fs.promises.lstat(canonical) };
+    } catch {
+      return null;
+    }
+  }
+
   private async nodeMatchesDisk(
     path: string,
     node: OverlayEntryNode,
   ): Promise<boolean> {
     if (node.type === "directory") {
-      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
-      if (!canonical) return false;
-      try {
-        return (await fs.promises.lstat(canonical)).isDirectory();
-      } catch {
-        return false;
-      }
+      const lower = await this.lstatLower(path);
+      return lower?.stat.isDirectory() ?? false;
     }
 
     if (node.type === "symlink") {
       if (!this.allowSymlinks) return false;
-      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
-      if (!canonical) return false;
+      const lower = await this.lstatLower(path);
+      if (!lower?.stat.isSymbolicLink()) return false;
       try {
-        const stat = await fs.promises.lstat(canonical);
-        if (!stat.isSymbolicLink()) return false;
-        const rawTarget = await fs.promises.readlink(canonical);
-        return this.realTargetToVirtual(path, rawTarget) === node.target;
+        const rawTarget = await fs.promises.readlink(lower.canonical);
+        return this.realTargetToVirtual(rawTarget) === node.target;
       } catch {
         return false;
       }
     }
 
     if (node.metacopy) {
-      const canonical = this.resolveRealPathParent_(this.toRealPath(path));
-      if (!canonical) return false;
-      try {
-        const stat = await fs.promises.lstat(canonical);
-        if (!stat.isFile()) return false;
-        if (stat.mtime.getTime() !== node.mtime.getTime()) return false;
-        if (
-          process.platform !== "win32" &&
-          (stat.mode & 0o7777) !== (node.mode & 0o7777)
-        ) {
-          return false;
-        }
-        return true;
-      } catch {
+      const lower = await this.lstatLower(path);
+      if (!lower?.stat.isFile()) return false;
+      const { stat } = lower;
+      if (stat.mtime.getTime() !== node.mtime.getTime()) return false;
+      if (
+        process.platform !== "win32" &&
+        (stat.mode & 0o7777) !== (node.mode & 0o7777)
+      ) {
         return false;
       }
+      return true;
     }
 
     // Full file node: byte-for-byte comparison. Use the canonical path and
@@ -435,7 +443,7 @@ export class OverlayFs implements IFileSystem {
     try {
       const stat = await fs.promises.lstat(canonical);
       if (!stat.isFile()) return false;
-      const upper = this.coalesceFileContent(node, path);
+      const upper = coalesceFileContent(node, path);
       // Cheap reject: sizes must match before any content is read.
       if (stat.size !== upper.byteLength) return false;
       const flags = this.allowSymlinks
@@ -448,7 +456,6 @@ export class OverlayFs implements IFileSystem {
       } finally {
         await fh.close();
       }
-      if (disk.byteLength !== upper.byteLength) return false;
       for (let i = 0; i < disk.byteLength; i++) {
         if (disk[i] !== upper[i]) return false;
       }
@@ -470,11 +477,7 @@ export class OverlayFs implements IFileSystem {
    */
   writeFileSync(path: string, content: string | Uint8Array): void {
     const normalized = normalizePath(path);
-    // Ensure parent directories exist
-    const parent = this.getDirname(normalized);
-    if (parent !== "/") {
-      this.mkdirSync(parent);
-    }
+    this.ensureParentDirs(normalized);
     const buffer =
       content instanceof Uint8Array
         ? content
@@ -485,11 +488,6 @@ export class OverlayFs implements IFileSystem {
       mode: DEFAULT_FILE_MODE,
       mtime: new Date(),
     });
-  }
-
-  private getDirname(path: string): string {
-    const lastSlash = path.lastIndexOf("/");
-    return lastSlash === 0 ? "/" : path.slice(0, lastSlash);
   }
 
   /**
@@ -688,7 +686,7 @@ export class OverlayFs implements IFileSystem {
         );
       }
       if (!memEntry.metacopy) {
-        return this.coalesceFileContent(memEntry, path);
+        return coalesceFileContent(memEntry, path);
       }
       // Metacopy: data still lives in the lower layer. POSIX serves
       // fall-through reads (metadata is worth the laziness); Windows
@@ -703,9 +701,13 @@ export class OverlayFs implements IFileSystem {
             mode: memEntry.mode,
             mtime: memEntry.mtime,
           });
-        } catch {
-          // Promotion is an optimization (and can hit the memory quota);
-          // fall-through reads remain correct.
+        } catch (e) {
+          // The memory quota (ENOSPC) must not break a read: promotion is
+          // an optimization and fall-through stays correct. Anything else
+          // is a tree invariant violation — fail loud.
+          if (!(e instanceof Error) || !e.message.startsWith("ENOSPC")) {
+            throw e;
+          }
         }
       }
       return data;
@@ -738,7 +740,7 @@ export class OverlayFs implements IFileSystem {
           throw new Error(`ENOENT: no such file or directory, open '${path}'`);
         }
         const rawTarget = await fs.promises.readlink(canonical);
-        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const virtualTarget = this.realTargetToVirtual(rawTarget);
         const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
         return this.readFileBuffer(resolvedTarget, seen);
       }
@@ -776,36 +778,6 @@ export class OverlayFs implements IFileSystem {
       }
       this.sanitizeError(e, path, "open");
     }
-  }
-
-  /**
-   * Coalesce a memory file node's base content and append chunks into a
-   * single buffer. Mutates the node to store the combined result.
-   */
-  private coalesceFileContent(
-    entry: OverlayFileNode,
-    virtualPath: string,
-  ): Uint8Array {
-    if (!entry.appendChunks || entry.appendChunks.length === 0) {
-      return entry.content;
-    }
-    const total = entry.appendChunks.reduce(
-      (sum, chunk) => sum + chunk.byteLength,
-      entry.content.byteLength,
-    );
-    if (!Number.isSafeInteger(total)) {
-      throw new Error(`EFBIG: file too large, read '${virtualPath}'`);
-    }
-    const combined = new Uint8Array(total);
-    combined.set(entry.content);
-    let offset = entry.content.byteLength;
-    for (const chunk of entry.appendChunks) {
-      combined.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    entry.content = combined;
-    entry.appendChunks = undefined;
-    return combined;
   }
 
   async writeFile(
@@ -981,7 +953,7 @@ export class OverlayFs implements IFileSystem {
           throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
         }
         const rawTarget = await fs.promises.readlink(canonical);
-        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const virtualTarget = this.realTargetToVirtual(rawTarget);
         const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
         return this.stat(resolvedTarget, seen);
       }
@@ -1069,13 +1041,7 @@ export class OverlayFs implements IFileSystem {
 
     let size = 0;
     if (entry.type === "file") {
-      size = entry.metacopy
-        ? (entry.lowerSize ?? 0)
-        : entry.content.byteLength +
-          (entry.appendChunks?.reduce(
-            (sum, chunk) => sum + chunk.byteLength,
-            0,
-          ) ?? 0);
+      size = entry.metacopy ? (entry.lowerSize ?? 0) : fileNodeBytes(entry);
     }
 
     return {
@@ -1098,10 +1064,7 @@ export class OverlayFs implements IFileSystem {
    * Handles absolute real-fs paths that point within the root by converting them
    * to virtual paths relative to the mount point.
    */
-  private realTargetToVirtual(
-    _symlinkVirtualPath: string,
-    rawTarget: string,
-  ): string {
+  private realTargetToVirtual(rawTarget: string): string {
     const result = sanitizeSymlinkTarget(rawTarget, this.canonicalRoot);
 
     if (result.withinRoot) {
@@ -1311,7 +1274,7 @@ export class OverlayFs implements IFileSystem {
           return { normalized, outsideOverlay: true };
         }
         const rawTarget = await fs.promises.readlink(canonical);
-        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const virtualTarget = this.realTargetToVirtual(rawTarget);
         const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
         return this.resolveForReaddir(resolvedTarget, true);
       }
@@ -1368,30 +1331,26 @@ export class OverlayFs implements IFileSystem {
     }
 
     // Check if it's a directory
+    // Inspect for the not-empty check. A path we cannot inspect (already
+    // gone, unreadable lower layer) is treated as deletable and simply
+    // gets whiteouted below.
+    let nonEmptyDir = false;
     try {
       const stat = await this.stat(normalized);
       if (stat.isDirectory) {
-        const children = await this.readdir(normalized);
-        if (children.length > 0 && !options?.recursive) {
-          throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
-        }
+        nonEmptyDir = (await this.readdir(normalized)).length > 0;
       }
-    } catch (e) {
-      // Re-throw ENOTEMPTY and other intentional errors.
-      // Only swallow errors from stat/readdir failing (e.g., ENOENT on real-fs).
-      if (
-        e instanceof Error &&
-        (e.message.includes("ENOTEMPTY") || e.message.includes("EISDIR"))
-      ) {
-        throw e;
-      }
-      // If stat fails, we'll just mark it as deleted
+    } catch {
+      // Uninspectable — proceed to the whiteout.
+    }
+    if (nonEmptyDir && !options?.recursive) {
+      throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
     }
 
     // Drop any upper-layer state and, when hiding a real-FS path, leave a
     // whiteout in its place. The tree releases the dropped subtree's byte
     // accounting, and the whiteout hides all lower-layer descendants — no
-    // per-child recursion or per-child tombstones are needed.
+    // per-child recursion or per-child whiteouts are needed.
     if (this.existsOnRealFs(normalized)) {
       this.tree.putWhiteout(normalized);
     } else {
@@ -1401,7 +1360,7 @@ export class OverlayFs implements IFileSystem {
 
   /**
    * Check (synchronously) whether a path exists on the real filesystem.
-   * Used to decide whether a tombstone is needed after deletion.
+   * Used to decide whether a whiteout is needed after deletion.
    */
   private existsOnRealFs(virtualPath: string): boolean {
     const realPath = this.toRealPath(virtualPath);
@@ -1508,15 +1467,6 @@ export class OverlayFs implements IFileSystem {
     }
   }
 
-  /** True when a whiteout hides `virtualPath` at or above it. */
-  private whiteoutBlocked(virtualPath: string): boolean {
-    const result = this.tree.descend(virtualPath);
-    return (
-      result.kind === "blocked" ||
-      (result.kind === "found" && result.node.type === "whiteout")
-    );
-  }
-
   /**
    * True when the lower layer at `virtualPath` is invisible: a whiteout at
    * or above the path, or a non-directory shadow in the way. Missing paths
@@ -1562,10 +1512,31 @@ export class OverlayFs implements IFileSystem {
       return;
     }
 
-    // If from real fs, attach a metacopy node: metadata moves to the
-    // upper layer, data stays lower (copied lazily on first content
-    // write). chmod changes ctime, not mtime — preserve the lower mtime.
+    // If from real fs, attach a metacopy shadow: metadata moves to the
+    // upper layer, data stays lower. chmod changes ctime, not mtime —
+    // preserve the lower mtime on file shadows.
     const stat = await this.stat(normalized);
+    this.attachMetacopyShadow(
+      normalized,
+      stat,
+      mode,
+      stat.isFile ? stat.mtime : new Date(),
+    );
+  }
+
+  /**
+   * Attach a metadata-only shadow for a lower-layer path: metadata moves
+   * to the upper layer, data stays lower (copied lazily on first content
+   * write for files). Callers pass the mode/mtime the shadow should carry
+   * (the operation's argument or the lower stat, depending on which
+   * metadata the operation changes).
+   */
+  private attachMetacopyShadow(
+    normalized: string,
+    stat: FsStat,
+    mode: number,
+    mtime: Date,
+  ): void {
     this.ensureParentDirs(normalized);
     if (stat.isFile) {
       this.tree.attach(normalized, {
@@ -1574,14 +1545,14 @@ export class OverlayFs implements IFileSystem {
         metacopy: true,
         lowerSize: stat.size,
         mode,
-        mtime: stat.mtime,
+        mtime,
       });
     } else if (stat.isDirectory) {
       this.tree.attach(normalized, {
         type: "directory",
         children: new Map(),
         mode,
-        mtime: new Date(),
+        mtime,
       });
     }
   }
@@ -1700,7 +1671,7 @@ export class OverlayFs implements IFileSystem {
         }
       }
 
-      return this.realTargetToVirtual(normalized, rawTarget);
+      return this.realTargetToVirtual(rawTarget);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(
@@ -1723,7 +1694,22 @@ export class OverlayFs implements IFileSystem {
     const normalized = normalizePath(path);
     const seen = new Set<string>();
 
-    // Helper to resolve symlinks iteratively
+    // Helper to resolve symlinks iteratively. One descent per component
+    // answers both questions the tree can answer: hidden-by-whiteout
+    // (blocked, or an exact whiteout) and the upper-layer entry.
+    const upperEntry = (p: string): OverlayEntryNode | undefined => {
+      const d = this.tree.descend(p);
+      if (
+        d.kind === "blocked" ||
+        (d.kind === "found" && d.node.type === "whiteout")
+      ) {
+        throw new Error(
+          `ENOENT: no such file or directory, realpath '${path}'`,
+        );
+      }
+      return d.kind === "found" ? (d.node as OverlayEntryNode) : undefined;
+    };
+
     const resolveAll = async (p: string): Promise<string> => {
       const parts = p === "/" ? [] : p.slice(1).split("/");
       let resolved = "";
@@ -1738,15 +1724,8 @@ export class OverlayFs implements IFileSystem {
           );
         }
 
-        // Check if hidden by a whiteout
-        if (this.whiteoutBlocked(resolved)) {
-          throw new Error(
-            `ENOENT: no such file or directory, realpath '${path}'`,
-          );
-        }
-
-        // Check the upper layer first
-        let entry = this.entryAt(resolved);
+        // Check the upper layer first (throws ENOENT if whiteout-hidden)
+        let entry = upperEntry(resolved);
         let loopCount = 0;
         const maxLoops = MAX_SYMLINK_DEPTH;
 
@@ -1761,13 +1740,7 @@ export class OverlayFs implements IFileSystem {
             );
           }
 
-          if (this.whiteoutBlocked(resolved)) {
-            throw new Error(
-              `ENOENT: no such file or directory, realpath '${path}'`,
-            );
-          }
-
-          entry = this.entryAt(resolved);
+          entry = upperEntry(resolved);
         }
 
         if (loopCount >= maxLoops) {
@@ -1791,10 +1764,7 @@ export class OverlayFs implements IFileSystem {
                   );
                 }
                 const rawTarget = await fs.promises.readlink(canonical);
-                const virtualTarget = this.realTargetToVirtual(
-                  resolved,
-                  rawTarget,
-                );
+                const virtualTarget = this.realTargetToVirtual(rawTarget);
                 seen.add(resolved);
                 resolved = this.resolveSymlink(resolved, virtualTarget);
 
@@ -1876,26 +1846,9 @@ export class OverlayFs implements IFileSystem {
       return;
     }
 
-    // If from real fs, attach a metacopy node: metadata moves up, data
-    // stays lower until the first content write.
+    // If from real fs, attach a metacopy shadow: metadata moves up,
+    // data stays lower until the first content write.
     const stat = await this.stat(normalized);
-    this.ensureParentDirs(normalized);
-    if (stat.isFile) {
-      this.tree.attach(normalized, {
-        type: "file",
-        content: new Uint8Array(0),
-        metacopy: true,
-        lowerSize: stat.size,
-        mode: stat.mode,
-        mtime,
-      });
-    } else if (stat.isDirectory) {
-      this.tree.attach(normalized, {
-        type: "directory",
-        children: new Map(),
-        mode: stat.mode,
-        mtime,
-      });
-    }
+    this.attachMetacopyShadow(normalized, stat, stat.mode, mtime);
   }
 }

@@ -20,7 +20,8 @@ export class CommandCollectorPlugin
     const { commands } = collectCommands(context.ast);
     return {
       ast: context.ast,
-      metadata: { commands: [...commands].sort() },
+      // collectCommands returns a fresh array; sort it in place.
+      metadata: { commands: commands.sort() },
     };
   }
 }

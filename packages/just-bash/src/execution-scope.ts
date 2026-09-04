@@ -40,7 +40,9 @@ const OUTPUT_RELEASE_AUTHORITY = Object.freeze(Object.create(null) as object);
 /**
  * Security-sensitive accounting shared by every interpreter descended from a
  * single public Bash.exec() call. This object is never accepted from callers;
- * nested exec functions capture it in a closure instead.
+ * nested exec functions capture it in a closure instead. It also funnels
+ * command-resolution-miss records (unresolvedCommands) from every nesting
+ * level into one per-exec list.
  *
  * Keep reservations centralized here so future output/byte/filesystem budgets
  * cannot accidentally be refreshed by starting a child interpreter.
@@ -58,7 +60,7 @@ export class ExecutionScope {
   private poisoned: ExecutionLimitError | ExecutionAbortedError | undefined;
   private closed = false;
   private readonly startedAt = Date.now();
-  private readonly unresolvedCommands: string[] = [];
+  private readonly unresolvedCommands = new Set<string>();
 
   /** Bytes still available for prospective intermediate allocations. */
   get remainingLiveBytes(): number {
@@ -86,9 +88,8 @@ export class ExecutionScope {
    * here — subshells, pipelines, command substitutions, nested `bash -c`.
    */
   recordUnresolvedCommand(name: string): void {
-    if (!this.unresolvedCommands.includes(name)) {
-      this.unresolvedCommands.push(name);
-    }
+    // Set preserves first-encountered order and dedupes natively.
+    this.unresolvedCommands.add(name);
   }
 
   /** Names that failed command resolution during this execution. */
