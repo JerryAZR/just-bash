@@ -66,13 +66,6 @@ async function flowA(overlay: OverlayFs, t: Timer): Promise<void> {
   await t.time("sync1", async () => overlay.sync());
 }
 
-/** exec → sync → diff → sync */
-async function flowB(overlay: OverlayFs, t: Timer): Promise<void> {
-  await t.time("sync1", async () => overlay.sync());
-  await t.time("diff", async () => overlay.diff());
-  await t.time("sync2", async () => overlay.sync());
-}
-
 describe("OverlayFs harness flows", () => {
   it(
     "per-turn: delete-recreate cycles with flow A after each",

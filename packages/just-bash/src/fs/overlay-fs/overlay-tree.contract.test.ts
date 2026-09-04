@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type OverlayDirNode,
-  type OverlayFileNode,
-  OverlayTree,
-} from "./overlay-tree.js";
+import { type OverlayFileNode, OverlayTree } from "./overlay-tree.js";
 
 /**
  * Contract pins for OverlayTree's mutation and descent rules that the
@@ -15,13 +11,6 @@ const fileNode = (content: string): OverlayFileNode => ({
   type: "file",
   content: new TextEncoder().encode(content),
   mode: 0o644,
-  mtime: new Date(),
-});
-
-const dirNode = (): OverlayDirNode => ({
-  type: "directory",
-  children: new Map(),
-  mode: 0o755,
   mtime: new Date(),
 });
 

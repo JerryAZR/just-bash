@@ -60,7 +60,6 @@ import { evaluateTestArgs } from "./conditionals.js";
 import { createDefenseAwareCommandContext } from "./defense-aware-command-context.js";
 import {
   ExecutionAbortedError,
-  ExecutionLimitError,
   ExitError,
   UnresolvedCommandError,
 } from "./errors.js";

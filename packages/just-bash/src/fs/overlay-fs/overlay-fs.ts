@@ -40,7 +40,6 @@ import type {
   WriteFileOptions,
 } from "../interface.js";
 import {
-  DEFAULT_DIR_MODE,
   DEFAULT_FILE_MODE,
   dirname,
   MAX_SYMLINK_DEPTH,
@@ -64,7 +63,6 @@ import {
   fileNodeBytes,
   type OverlayDirNode,
   type OverlayEntryNode,
-  type OverlayFileNode,
   OverlayTree,
 } from "./overlay-tree.js";
 

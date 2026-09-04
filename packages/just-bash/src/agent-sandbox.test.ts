@@ -115,10 +115,11 @@ describe("createAgentSandbox", () => {
     const all = sandbox.diff();
     const one = all.writes.find((w) => w.path.endsWith("one.txt"));
     const two = all.writes.find((w) => w.path.endsWith("two.txt"));
+    if (!one || !two) throw new Error("expected writes missing from diff");
     // Sabotage the middle entry: its parent path is an existing FILE.
     const sabotaged = {
       writes: [
-        one!,
+        one,
         {
           path: path.join(projectDir, "one.txt", "impossible.txt"),
           nodeType: "file" as const,
@@ -126,7 +127,7 @@ describe("createAgentSandbox", () => {
           mode: 0o644,
           mtime: new Date(),
         },
-        two!,
+        two,
       ],
       deletions: [],
     };
