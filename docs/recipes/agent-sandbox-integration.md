@@ -12,7 +12,7 @@ everything it changed.
 
 ```ts
 import os from "node:os";
-import { createAgentSandbox } from "just-bash";
+import { createAgentSandbox } from "@jerryan/just-bash";
 
 const sandbox = createAgentSandbox({
   home: os.homedir(),            // real dir -> virtual /home/user

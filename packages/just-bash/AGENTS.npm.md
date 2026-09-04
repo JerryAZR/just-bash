@@ -45,7 +45,7 @@ See the [bash-tool documentation](https://github.com/vercel-labs/bash-tool) for 
 ## Quick Reference
 
 ```typescript
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 
 const bash = new Bash({
   files: { "/data/input.txt": "content" }, // Initial files
@@ -250,7 +250,7 @@ cat data.csv | awk -F',' '{sum += $3} END {print sum}'
 Always check `exitCode`:
 
 ```typescript
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 
 const bash = new Bash({ files: { "/file.txt": "some content" } });
 const result = await bash.exec("grep pattern file.txt");
@@ -364,7 +364,7 @@ Next.js 15+:
 // next.config.ts
 const nextConfig = {
   serverExternalPackages: [
-    "just-bash",
+    "@jerryan/just-bash",
     "@mongodb-js/zstd",
     "node-liblzma",
     "seek-bzip",

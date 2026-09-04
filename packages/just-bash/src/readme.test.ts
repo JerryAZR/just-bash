@@ -148,27 +148,34 @@ function addImpliedImports(code: string): string {
   const imports: string[] = [];
 
   // Check what's used and add appropriate imports
-  if (code.includes("Bash") && !code.includes('from "just-bash"')) {
-    imports.push('import { Bash } from "just-bash";');
+  if (code.includes("Bash") && !code.includes('from "@jerryan/just-bash"')) {
+    imports.push('import { Bash } from "@jerryan/just-bash";');
   }
-  if (code.includes("defineCommand") && !code.includes('from "just-bash"')) {
-    imports.push('import { defineCommand } from "just-bash";');
+  if (
+    code.includes("defineCommand") &&
+    !code.includes('from "@jerryan/just-bash"')
+  ) {
+    imports.push('import { defineCommand } from "@jerryan/just-bash";');
   }
-  if (code.includes("Sandbox") && !code.includes('from "just-bash"')) {
-    imports.push('import { Sandbox } from "just-bash";');
+  if (code.includes("Sandbox") && !code.includes('from "@jerryan/just-bash"')) {
+    imports.push('import { Sandbox } from "@jerryan/just-bash";');
   }
   // bash-tool imports are handled via ephemeral type definitions
   if (
     code.includes("OverlayFs") &&
-    !code.includes('from "just-bash/fs/overlay-fs"')
+    !code.includes('from "@jerryan/just-bash/fs/overlay-fs"')
   ) {
-    imports.push('import { OverlayFs } from "just-bash/fs/overlay-fs";');
+    imports.push(
+      'import { OverlayFs } from "@jerryan/just-bash/fs/overlay-fs";',
+    );
   }
   if (
     code.includes("ReadWriteFs") &&
-    !code.includes('from "just-bash/fs/read-write-fs"')
+    !code.includes('from "@jerryan/just-bash/fs/read-write-fs"')
   ) {
-    imports.push('import { ReadWriteFs } from "just-bash/fs/read-write-fs";');
+    imports.push(
+      'import { ReadWriteFs } from "@jerryan/just-bash/fs/read-write-fs";',
+    );
   }
   // ai imports are handled via ephemeral type definitions
 
@@ -259,11 +266,13 @@ export function generateText(options: {
         allowSyntheticDefaultImports: true,
         resolveJsonModule: true,
         paths: {
-          "just-bash": [path.join(import.meta.dirname, "..", "src/index.ts")],
-          "just-bash/fs/overlay-fs": [
+          "@jerryan/just-bash": [
+            path.join(import.meta.dirname, "..", "src/index.ts"),
+          ],
+          "@jerryan/just-bash/fs/overlay-fs": [
             path.join(import.meta.dirname, "..", "src/fs/overlay-fs/index.ts"),
           ],
-          "just-bash/fs/read-write-fs": [
+          "@jerryan/just-bash/fs/read-write-fs": [
             path.join(
               import.meta.dirname,
               "..",

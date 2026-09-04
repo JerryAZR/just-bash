@@ -30,4 +30,4 @@ pnpm typecheck            # tsc across all packages
 ```
 
 Per-package commands run via `pnpm --filter <name> <script>` — e.g.
-`pnpm --filter just-bash test:wasm`.
+`pnpm --filter @jerryan/just-bash test:wasm`.
