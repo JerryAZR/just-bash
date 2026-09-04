@@ -228,6 +228,34 @@ await env.exec('echo "modified" > package.json'); // stays in memory
 copy-on-write layer, including append chunks. Set it to the deployment's memory
 budget when an `OverlayFs` is reused across executions.
 
+**Change sets** — `diff()`, `sync()`, and `reset()` turn the overlay into a
+reviewable sandbox: the agent writes only to memory, the host applies accepted
+changes, and `sync()` drops whatever now matches disk (rejected changes stay
+pending; `reset()` discards everything):
+
+```typescript
+import { OverlayFs } from "just-bash/fs/overlay-fs";
+
+const overlay = new OverlayFs({ root: "/path/to/project" });
+// ... run agent commands against the overlay ...
+
+const diff = overlay.diff();
+for (const write of diff.writes) {
+  // { path, nodeType, content, mode, mtime, metadataOnly? }
+  console.log("write", write.path);
+}
+for (const rel of diff.deletions) {
+  console.log("delete", rel);
+}
+// Host applies what it accepts to the real directory, then:
+await overlay.sync(); // applied changes drop out of the pending set
+```
+
+See the [agent sandbox integration recipe](../../docs/recipes/agent-sandbox-integration.md)
+and `examples/agent-sandbox.mjs` for the full per-turn loop (static pre-flight,
+sandboxed exec, host-side apply, reconcile), including the out-of-band
+modification policy you must read before pointing this at a live project.
+
 **ReadWriteFs** - Direct read-write access to a real directory. Use this if you want the agent to be able to write to your disk:
 
 ```typescript
