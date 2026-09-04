@@ -9,7 +9,12 @@ name: Release
 # Publishing to npm is enabled via the npm Trusted Publisher mechanism.
 # The workflow filename (`release.yml`) is bound to the publisher config on
 # npm.com — renaming or replacing this file will break publishing until the
-# npm-side setting is updated to match.
+# npm-side setting is updated to match. Fork setup: bind the publisher for
+# `@jerryan/just-bash` to this repo and this filename on npm.com.
+#
+# A guard job skips the whole workflow when no changesets are queued — the
+# per-push workflows already run the full gate, so running it again here on
+# every push would only double CI minutes.
 #
 # See https://docs.npmjs.com/trusted-publishers for the publisher binding.
 
@@ -20,7 +25,26 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      queued: ${{ steps.check.outputs.queued }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - id: check
+        run: |
+          if find .changeset -name '*.md' ! -name README.md | grep -q .; then
+            echo "queued=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "queued=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: guard
+    if: needs.guard.outputs.queued == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

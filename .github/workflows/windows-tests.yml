@@ -1,0 +1,51 @@
+name: Windows Tests
+
+# The fork carries deliberate Windows behavior that ubuntu CI cannot
+# exercise: metacopy promote-on-read, mode-inheritance stat skip,
+# getAllPaths mount scanning, and the createAgentSandbox flow. Full-suite
+# Windows runs are not viable (upstream has ~170 environment-dependent
+# failures there: symlink privileges, drive-letter path assumptions), so
+# this job runs only the suites that pin fork behavior — excluding
+# overlay-fs.security.test.ts, whose 3 readdir traversal tests encode
+# upstream's fail-open Windows-path semantics (tracked for an upstream
+# report) and fail on Windows by design.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-tests:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run fork-behavior suites
+        run: >-
+          pnpm --filter @jerryan/just-bash exec vitest run
+          --config vitest.unit.config.ts
+          src/fs/overlay-fs/
+          src/agent-sandbox.test.ts
+          src/agent-examples/sandboxed-host-sync.test.ts
+          src/interpreter/unresolved-commands.test.ts
+          src/interpreter/command-analysis.test.ts
+          --exclude "**/overlay-fs.security.test.ts"

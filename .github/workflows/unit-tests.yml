@@ -44,3 +44,8 @@ jobs:
 
       - name: Run dist tests
         run: pnpm test:dist
+
+      # The primary-use-case recipe, exercised end to end against the
+      # freshly built dist (createAgentSandbox -> exec -> diff -> apply).
+      - name: Run agent-sandbox example
+        run: node packages/just-bash/examples/agent-sandbox.mjs
