@@ -142,5 +142,19 @@ describe("OverlayFs sync() and reset()", () => {
       await overlay.writeFile("/project/after.txt", "a");
       expect(overlay.diff().writes.map((w) => w.path)).toEqual(["/after.txt"]);
     });
+
+    it("sees out-of-band disk additions after reset and keeps scaffolding", async () => {
+      const overlay = makeOverlay();
+      // Created on disk while the overlay is live (the documented
+      // re-baseline path after intentional external changes).
+      fs.writeFileSync(path.join(tempDir, "external.txt"), "ext");
+      overlay.reset();
+      await expect(overlay.readFile("/project/external.txt")).resolves.toBe(
+        "ext",
+      );
+      // Mount scaffolding (parents of the mount point) survives reset.
+      expect(await overlay.exists("/project")).toBe(true);
+      expect(await overlay.exists("/")).toBe(true);
+    });
   });
 });

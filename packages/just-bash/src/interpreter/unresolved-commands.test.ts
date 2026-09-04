@@ -74,7 +74,7 @@ describe("unresolved command reporting", () => {
       files: { "/noexec.sh": { content: "echo hi\n", mode: 0o644 } },
     });
     const result = await bash.exec("chmod 644 /noexec.sh; /noexec.sh");
-    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode).toBe(126);
     expect(result.unresolvedCommands).toEqual([]);
   });
 });

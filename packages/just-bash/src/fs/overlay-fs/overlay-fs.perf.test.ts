@@ -136,14 +136,12 @@ describe("OverlayFs performance", () => {
           await overlay.exists(`/p/deps/d0/f${i}.txt`);
         }
       });
-      const overlay2 = makeOverlay();
       await timed("delete-heavy:rm-rf-5k", async () => {
         // Fresh overlay per run: the disk tree persists, so each iteration
         // measures a complete rm -rf of the same 5k-file tree.
         const fresh = makeOverlay();
         await fresh.rm("/p/deps", { recursive: true });
       });
-      await overlay2.stat("/p/src");
     },
   );
 

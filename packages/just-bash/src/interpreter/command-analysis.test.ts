@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../Bash.js";
+import { ParseException } from "../parser/types.js";
 import {
   POSIX_SPECIAL_BUILTINS,
   SHELL_BUILTINS,
@@ -108,7 +109,9 @@ describe("analyzeCommands", () => {
 
   it("throws ParseException on syntax errors", async () => {
     const bash = new Bash();
-    await expect(bash.analyzeCommands("if true; then")).rejects.toThrow();
+    await expect(bash.analyzeCommands("if true; then")).rejects.toThrow(
+      ParseException,
+    );
   });
 
   it("collects commands inside redirection target substitutions", async () => {

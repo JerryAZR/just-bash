@@ -146,6 +146,17 @@ describe("OverlayFs diff()", () => {
     expect(overlay.diff().deletions).toEqual(["/big"]);
   });
 
+  it("skips a metacopy whose lower file vanished (no phantom write)", async () => {
+    fs.writeFileSync(path.join(tempDir, "vanished.sh"), "#!/bin/sh\n");
+    const overlay = makeOverlay();
+    await overlay.chmod("/project/vanished.sh", 0o755);
+    // Lower file disappears out-of-band before the diff: the pending
+    // metadata write must be skipped rather than emitted with empty
+    // content (which a host might apply as a truncated file).
+    fs.rmSync(path.join(tempDir, "vanished.sh"));
+    expect(overlay.diff()).toEqual({ writes: [], deletions: [] });
+  });
+
   describe("metadata-only writes", () => {
     it("reports chmod as a metadataOnly write with empty content", async () => {
       fs.writeFileSync(path.join(tempDir, "run.sh"), "#!/bin/sh\n");

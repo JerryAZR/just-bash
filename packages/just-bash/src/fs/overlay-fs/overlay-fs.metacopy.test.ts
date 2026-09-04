@@ -56,7 +56,26 @@ describe("OverlayFs metacopy", () => {
     const st = await overlay.stat("/p/run.sh");
     expect(st.mtime).toEqual(when);
     expect(st.size).toBe(18);
-    await expect(overlay.readFile("/p/run.sh")).resolves.toContain("echo hi");
+    await expect(overlay.readFile("/p/run.sh")).resolves.toBe(
+      "#!/bin/sh\necho hi\n",
+    );
+  });
+
+  it("chmod on a lower directory records a plain directory write", async () => {
+    // Directories have no metacopy: chmod shadows the whole directory
+    // node, and diff reports a normal (not metadataOnly) directory write.
+    fs.mkdirSync(path.join(tempDir, "srcdir"));
+    const overlay = makeOverlay();
+    await overlay.chmod("/p/srcdir", 0o700);
+    const writes = overlay.diff().writes;
+    expect(writes).toEqual([
+      expect.objectContaining({
+        path: "/srcdir",
+        nodeType: "directory",
+        mode: 0o700,
+      }),
+    ]);
+    expect(writes[0].metadataOnly).toBeUndefined();
   });
 
   it("chmod does not touch mtime (POSIX: ctime only)", async () => {
@@ -116,6 +135,8 @@ describe("OverlayFs metacopy", () => {
     await overlay.readFile("/p/run.sh");
     // Promoted: content is now memory-resident even if the lower file goes away.
     fs.rmSync(path.join(tempDir, "run.sh"));
-    await expect(overlay.readFile("/p/run.sh")).resolves.toContain("echo hi");
+    await expect(overlay.readFile("/p/run.sh")).resolves.toBe(
+      "#!/bin/sh\necho hi\n",
+    );
   });
 });

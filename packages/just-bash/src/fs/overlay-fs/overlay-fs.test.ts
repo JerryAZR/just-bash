@@ -687,7 +687,8 @@ describe("OverlayFs", () => {
       // All read operations should work
       expect(await overlay.readFile("/test.txt")).toBe("content");
       expect(await overlay.exists("/test.txt")).toBe(true);
-      expect(await overlay.stat("/test.txt")).toBeDefined();
+      const st = await overlay.stat("/test.txt");
+      expect(st.isFile).toBe(true);
       expect(await overlay.readdir("/")).toContain("test.txt");
     });
 
@@ -785,8 +786,8 @@ describe("OverlayFs", () => {
       await env.exec('echo "memory" > /memory.txt');
 
       const result = await env.exec('find / -name "*.txt"');
-      expect(result.stdout).toContain("real.txt");
-      expect(result.stdout).toContain("memory.txt");
+      const found = result.stdout.split("\n").filter(Boolean).sort();
+      expect(found).toEqual(["/memory.txt", "/real.txt"]);
     });
   });
 
@@ -989,15 +990,17 @@ describe("OverlayFs", () => {
       expect((await overlay.stat("/new.txt")).mode).toBe(0o644);
     });
 
-    it("uses the default mode when shadowing lower files on Windows", async () => {
-      // Pins the win32 rule above: no stat is paid for advisory mode bits.
-      if (process.platform !== "win32") return;
-      const filePath = path.join(tempDir, "win.txt");
-      fs.writeFileSync(filePath, "v1");
-      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
-      await overlay.writeFile("/win.txt", "v2");
-      expect((await overlay.stat("/win.txt")).mode).toBe(0o644);
-    });
+    it.runIf(process.platform === "win32")(
+      "uses the default mode when shadowing lower files on Windows",
+      async () => {
+        // Pins the win32 rule above: no stat is paid for advisory mode bits.
+        const filePath = path.join(tempDir, "win.txt");
+        fs.writeFileSync(filePath, "v1");
+        const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+        await overlay.writeFile("/win.txt", "v2");
+        expect((await overlay.stat("/win.txt")).mode).toBe(0o644);
+      },
+    );
   });
 
   describe("getAllPaths", () => {
@@ -1013,6 +1016,18 @@ describe("OverlayFs", () => {
       expect(paths).toContain("/p/src/nested/deep.txt");
       expect(paths).toContain("/p/upper.txt");
       expect(paths).not.toContain("/p/README.md");
+    });
+
+    it("excludes descendants of a whiteouted directory", async () => {
+      fs.mkdirSync(path.join(tempDir, "src/nested"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "src/nested/deep.txt"), "d");
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/p" });
+      await overlay.rm("/p/src", { recursive: true });
+
+      const paths = overlay.getAllPaths();
+      expect(paths).not.toContain("/p/src");
+      expect(paths).not.toContain("/p/src/nested");
+      expect(paths).not.toContain("/p/src/nested/deep.txt");
     });
   });
 });
