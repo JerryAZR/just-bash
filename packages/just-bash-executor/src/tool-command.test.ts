@@ -1,4 +1,4 @@
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 import { describe, expect, it } from "vitest";
 import { createExecutor } from "./create-executor.js";
 import { camelToKebab, parseToolCliArgs } from "./tool-command.js";

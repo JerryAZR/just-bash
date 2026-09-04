@@ -34,7 +34,7 @@ const NOSCRIPT_CONTENT = `
   BASIC USAGE
   -----------
 
-  import { Bash } from "just-bash";
+  import { Bash } from "@jerryan/just-bash";
 
   const env = new Bash();
   await env.exec('echo "Hello" > greeting.txt');

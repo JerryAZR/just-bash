@@ -170,7 +170,7 @@ describe("@just-bash/executor inline tools work in plain Node ESM", () => {
   it("createExecutor with inline tools, no plugins, no SDK setup", () => {
     const r = nodeRun(`
       const { createExecutor } = await import("@just-bash/executor");
-      const { Bash } = await import("just-bash");
+      const { Bash } = await import("@jerryan/just-bash");
 
       const executor = await createExecutor({
         tools: {

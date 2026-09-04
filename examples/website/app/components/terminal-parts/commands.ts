@@ -1,4 +1,4 @@
-import { defineCommand } from "just-bash/browser";
+import { defineCommand } from "@jerryan/just-bash/browser";
 import { getTerminalData } from "../TerminalData";
 
 export function createStaticCommands() {

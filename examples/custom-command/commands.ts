@@ -13,7 +13,7 @@ import {
   buildLinkSummaryPrompt,
   pickSummaryLengthForCharacters,
 } from "@steipete/summarize-core/prompts";
-import { decodeBytesToUtf8, defineCommand } from "just-bash";
+import { decodeBytesToUtf8, defineCommand } from "@jerryan/just-bash";
 
 /**
  * Generate a random UUID

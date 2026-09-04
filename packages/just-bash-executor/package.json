@@ -50,7 +50,7 @@
     "@executor-js/plugin-mcp": "^0.2.0",
     "@executor-js/plugin-openapi": "^0.2.0",
     "@executor-js/sdk": "^0.2.0",
-    "just-bash": "workspace:*"
+    "@jerryan/just-bash": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@executor-js/sdk": {
@@ -70,5 +70,6 @@
     "@types/node": "^25.9.5",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
-  }
+  },
+  "private": true
 }

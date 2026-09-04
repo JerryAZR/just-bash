@@ -1,4 +1,4 @@
-import { defineCommand } from "just-bash/browser";
+import { defineCommand } from "@jerryan/just-bash/browser";
 import { MAX_TOOL_OUTPUT_LINES } from "./constants";
 import { formatMarkdown } from "./markdown";
 

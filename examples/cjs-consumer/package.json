@@ -8,7 +8,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "just-bash": "workspace:*"
+    "@jerryan/just-bash": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

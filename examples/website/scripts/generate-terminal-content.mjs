@@ -72,7 +72,7 @@ Type 'help' for a list of all built-in commands.
 export const CMD_INSTALL = \`npm install just-bash
 
 Usage:
-  import { Bash } from "just-bash";
+  import { Bash } from "@jerryan/just-bash";
   const bash = new Bash();
   const result = await bash.exec("echo hello");
 \`;

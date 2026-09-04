@@ -8,7 +8,7 @@
 import * as path from "node:path";
 import { streamText, stepCountIs } from "ai";
 import { createBashTool } from "bash-tool";
-import { Bash, OverlayFs } from "just-bash";
+import { Bash, OverlayFs } from "@jerryan/just-bash";
 
 export interface AgentRunner {
   chat(

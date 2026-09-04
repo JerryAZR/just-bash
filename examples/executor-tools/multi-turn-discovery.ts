@@ -16,7 +16,7 @@
  */
 
 import { createExecutor } from "@just-bash/executor";
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 
 const COUNTRIES = {
   JP: { name: "Japan", capital: "Tokyo", continent: "Asia" },

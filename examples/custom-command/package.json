@@ -12,7 +12,7 @@
     "@ai-sdk/gateway": "^3.0.172",
     "@steipete/summarize-core": "^0.7.1",
     "ai": "^6.0.253",
-    "just-bash": "workspace:*"
+    "@jerryan/just-bash": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.5",

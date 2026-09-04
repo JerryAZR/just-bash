@@ -18,7 +18,7 @@
  */
 
 import { createExecutor } from "@just-bash/executor";
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 
 const ARG = process.argv[2] ?? "JP";
 

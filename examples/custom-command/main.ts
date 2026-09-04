@@ -5,7 +5,7 @@
  * Run with: npx tsx main.ts
  */
 
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 import {
   uuidCommand,
   jsonFormatCommand,

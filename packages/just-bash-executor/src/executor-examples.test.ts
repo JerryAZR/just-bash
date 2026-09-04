@@ -7,7 +7,7 @@
  * defense-in-depth is disabled because Effect's runtime sets Error.stackTraceLimit,
  * which conflicts with the frozen Error constructor in defense-in-depth mode.
  */
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createExecutor } from "./create-executor.js";
 import type { ExecutorConfig, ExecutorSDKHandle } from "./types.js";

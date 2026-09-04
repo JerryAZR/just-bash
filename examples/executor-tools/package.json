@@ -15,7 +15,7 @@
     "@executor-js/plugin-openapi": "^0.2.1",
     "@executor-js/sdk": "^0.2.1",
     "@just-bash/executor": "workspace:*",
-    "just-bash": "workspace:*"
+    "@jerryan/just-bash": "workspace:*"
   },
   "private": true
 }

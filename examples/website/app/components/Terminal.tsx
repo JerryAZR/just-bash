@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Bash } from "just-bash/browser";
+import { Bash } from "@jerryan/just-bash/browser";
 import { getTerminalData } from "./TerminalData";
 import {
   createStaticCommands,

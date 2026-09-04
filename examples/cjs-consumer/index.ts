@@ -1,4 +1,4 @@
-import { Bash } from "just-bash";
+import { Bash } from "@jerryan/just-bash";
 
 async function main() {
   const bash = new Bash();

@@ -10,7 +10,7 @@
  *     use (e.g. listing sources)
  */
 
-import type { Command } from "just-bash";
+import type { Command } from "@jerryan/just-bash";
 import { initExecutorSDK } from "./executor-init.js";
 import { parseToolArgs } from "./parse-tool-args.js";
 import { buildNamespaceCommands, type ToolEntry } from "./tool-command.js";
