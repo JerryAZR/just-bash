@@ -378,6 +378,46 @@ export class OverlayFs implements IFileSystem {
   }
 
   /**
+   * Drop pending upper-layer state at the given paths (root-relative with
+   * a leading slash, exactly as {@link diff} emits them). Pure tree
+   * operation — no disk I/O, no match verification: the caller asserts
+   * these entries are done with, for whatever reason (applied to disk,
+   * rejected, superseded); the overlay does not care which.
+   *
+   * Per path: file/symlink nodes detach; whiteouts detach (dropping a
+   * pending deletion resurrects the lower-layer view of the path);
+   * directory nodes detach only when childless of pending children (same
+   * structural rule as {@link sync}), so a listed directory with
+   * still-pending children is kept until they drain. Unknown paths are a
+   * no-op. Nested paths in one call are handled deepest-first, so
+   * children drain before their parents are evaluated.
+   *
+   * {@link reset} is drop-everything; {@link sync} is drop-what-matches-
+   * disk. `drop()` is for callers that already know which entries are
+   * done — e.g. a host that just applied a change set.
+   */
+  drop(paths: string[]): void {
+    // diff() emits mount-relative paths; map them back to tree paths.
+    const normalized = paths.map((p) => {
+      const rel = normalizePath(p);
+      if (rel === "/") {
+        throw new Error(`EINVAL: invalid argument, drop '${p}'`);
+      }
+      return this.mountPoint === "/" ? rel : `${this.mountPoint}${rel}`;
+    });
+    // Deepest-first: an ancestor is always a strict prefix (hence
+    // shorter), so length sorting drains children before their parents.
+    normalized.sort((a, b) => b.length - a.length);
+    for (const p of normalized) {
+      const result = this.tree.descend(p);
+      if (result.kind !== "found") continue;
+      const node = result.node;
+      if (node.type === "directory" && node.children.size > 0) continue;
+      this.tree.detach(p);
+    }
+  }
+
+  /**
    * True when the disk entry at `path` matches the upper-layer shadow:
    * byte-identical content for full file nodes, metadata for metacopy
    * nodes (mtime everywhere, mode on POSIX), existence for directories,

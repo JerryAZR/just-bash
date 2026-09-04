@@ -253,7 +253,7 @@ await overlay.sync(); // applied changes drop out of the pending set
 
 **`createAgentSandbox`** bundles the whole setup for the common agent case —
 InMemoryFs root, overlays over the real home and project directories, combined
-change sets with real absolute paths, and `applyChanges()` (apply + reconcile
+change sets with real absolute paths, and `applyChanges()` (apply + drop
 in one call):
 
 ```typescript
@@ -266,7 +266,7 @@ const sandbox = createAgentSandbox({
 });
 const result = await sandbox.exec("echo hi > notes.txt");
 const changes = sandbox.diff(); // real paths
-await sandbox.applyChanges(changes); // host applies; pending set reconciles
+await sandbox.applyChanges(changes); // host applies; applied entries drop
 ```
 
 See the [agent sandbox integration recipe](../../docs/recipes/agent-sandbox-integration.md)

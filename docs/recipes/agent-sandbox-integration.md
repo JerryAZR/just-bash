@@ -24,7 +24,7 @@ const sandbox = createAgentSandbox({
 const analysis = await sandbox.analyzeCommands(script);  // 1. static pre-flight
 const result = await sandbox.exec(script);               // 2. sandboxed exec
 const changes = sandbox.diff();                          // 3. exact change set
-await sandbox.applyChanges(changes);                     // 4. host applies + reconciles
+await sandbox.applyChanges(changes);                     // 4. host applies + drops applied
 ```
 
 - The sandbox **never writes to the underlying directories by itself**;
@@ -111,7 +111,7 @@ delegating**, so an overlay mounted through it must use `mountPoint: "/"`
 `OverlayFs` is for using the overlay *directly* as a Bash filesystem,
 where it sees full VFS paths.
 
-At this level you manage each overlay's `diff()`/`sync()`/`reset()`
+At this level you manage each overlay's `diff()`/`sync()`/`reset()`/`drop()`
 yourself (paths are root-relative per overlay), and host-side apply is
 your own loop — see the test file for a reference implementation.
 

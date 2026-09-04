@@ -109,6 +109,38 @@ describe("createAgentSandbox", () => {
     expect(result.unresolvedCommands).toEqual(["nosuchcmd"]);
   });
 
+  it("drops applied entries even when a later apply fails", async () => {
+    const sandbox = createAgentSandbox({ project: projectDir });
+    await sandbox.exec("echo a > one.txt; echo b > two.txt");
+    const all = sandbox.diff();
+    const one = all.writes.find((w) => w.path.endsWith("one.txt"));
+    const two = all.writes.find((w) => w.path.endsWith("two.txt"));
+    // Sabotage the middle entry: its parent path is an existing FILE.
+    const sabotaged = {
+      writes: [
+        one!,
+        {
+          path: path.join(projectDir, "one.txt", "impossible.txt"),
+          nodeType: "file" as const,
+          content: new TextEncoder().encode("x"),
+          mode: 0o644,
+          mtime: new Date(),
+        },
+        two!,
+      ],
+      deletions: [],
+    };
+    await expect(sandbox.applyChanges(sabotaged)).rejects.toThrow();
+    // one.txt was applied and dropped; two.txt was never reached and
+    // stays pending. The sabotage entry left nothing behind.
+    const pending = sandbox.diff();
+    expect(pending.writes.map((w) => path.basename(w.path))).toEqual([
+      "two.txt",
+    ]);
+    expect(fs.existsSync(path.join(projectDir, "one.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(projectDir, "two.txt"))).toBe(false);
+  });
+
   it("applies metadataOnly writes without touching content", async () => {
     if (process.platform === "win32") return;
     const sandbox = createAgentSandbox({ project: projectDir });

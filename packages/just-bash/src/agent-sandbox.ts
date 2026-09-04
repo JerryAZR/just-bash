@@ -58,7 +58,7 @@ export interface SandboxChangeSet {
  * await sandbox.analyzeCommands(script);   // static pre-flight
  * const result = await sandbox.exec(script); // sandboxed; writes in memory
  * const changes = sandbox.diff();            // real paths, reviewable
- * await sandbox.applyChanges(changes);       // host applies + auto-sync
+ * await sandbox.applyChanges(changes);       // host applies + drops applied
  * ```
  *
  * The sandbox never writes to the underlying directories by itself.
@@ -155,23 +155,60 @@ export class AgentSandbox {
   }
 
   /**
-   * Apply a change set to the real directories, then reconcile: applied
-   * changes drop out of the pending set automatically (sync runs
-   * internally), so there is no separate sync step in the per-turn loop.
+   * Apply a change set to the real directories, dropping each applied
+   * entry from the pending set as it goes — no separate sync step in the
+   * per-turn loop.
    *
    * Pass a filtered subset to reject changes — anything not applied stays
    * pending (review again or discard with reset()). Fails hard on the
-   * first apply error; already-applied entries then remain pending, so a
-   * retry is safe.
+   * first apply error: entries applied so far are dropped (their work is
+   * done), the rest stay pending, and a retry is safe.
    */
   async applyChanges(changes: SandboxChangeSet = this.diff()): Promise<void> {
-    for (const target of changes.deletions) {
-      fs.rmSync(target, { recursive: true, force: true });
+    const applied = new Map<OverlayFs, string[]>();
+    const record = (realPath: string) => {
+      const found = this.findOverlay(realPath);
+      if (!found) return;
+      const rel = `/${nodePath
+        .relative(found.root, realPath)
+        .split(nodePath.sep)
+        .join("/")}`;
+      const list = applied.get(found.fs);
+      if (list) list.push(rel);
+      else applied.set(found.fs, [rel]);
+    };
+    try {
+      for (const target of changes.deletions) {
+        fs.rmSync(target, { recursive: true, force: true });
+        record(target);
+      }
+      for (const write of changes.writes) {
+        applyWrite(write);
+        record(write.path);
+      }
+    } finally {
+      // Drop whatever was applied (all of it on success, the successful
+      // prefix on failure) — work done is work done.
+      for (const [overlay, relPaths] of applied) {
+        overlay.drop(relPaths);
+      }
     }
-    for (const write of changes.writes) {
-      applyWrite(write);
+  }
+
+  /** Longest-prefix match of a real path onto a mounted overlay. */
+  private findOverlay(
+    realPath: string,
+  ): { root: string; fs: OverlayFs } | null {
+    let best: { root: string; fs: OverlayFs } | null = null;
+    for (const entry of this.overlays.values()) {
+      if (
+        realPath === entry.root ||
+        realPath.startsWith(entry.root + nodePath.sep)
+      ) {
+        if (!best || entry.root.length > best.root.length) best = entry;
+      }
     }
-    await this.sync();
+    return best;
   }
 
   /**

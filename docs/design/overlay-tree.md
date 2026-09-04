@@ -116,6 +116,12 @@ synthesized and nothing in the overlay enforces it.
   detach. After the host applies a diff, `sync()` leaves exactly the
   still-pending changes — no per-path bookkeeping.
 - **`reset()`** — clear the tree and rescaffold (trust-disk re-baseline).
+- **`drop(paths)`** — intent-neutral, zero-I/O removal of listed pending
+  entries (applied, rejected, superseded — the overlay does not care
+  which). Detaches files/symlinks/whiteouts; directories only when
+  childless of pending children (sync's structural rule); nested paths
+  handled deepest-first. `reset()` is drop-everything, `sync()` is
+  drop-what-matches-disk; `drop()` is for callers that already know.
 
 ## Out-of-band policy
 
