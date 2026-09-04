@@ -49,3 +49,5 @@ jobs:
           src/interpreter/unresolved-commands.test.ts
           src/interpreter/command-analysis.test.ts
           --exclude "**/overlay-fs.security.test.ts"
+          --exclude "**/overlay-fs.perf.test.ts"
+          --exclude "**/overlay-fs.flows.perf.test.ts"

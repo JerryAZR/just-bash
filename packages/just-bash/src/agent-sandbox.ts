@@ -1,8 +1,12 @@
-import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { Bash, type BashOptions } from "./Bash.js";
 import { InMemoryFs } from "./fs/in-memory-fs/index.js";
 import { MountableFs } from "./fs/mountable-fs/mountable-fs.js";
+import {
+  applyWriteToRealFs,
+  canonicalizeRealPath,
+  removeFromRealFs,
+} from "./fs/overlay-fs/apply.js";
 import type { OverlayWrite } from "./fs/overlay-fs/index.js";
 import { OverlayFs } from "./fs/overlay-fs/index.js";
 import type { BashExecResult, CommandAnalysis } from "./types.js";
@@ -77,8 +81,8 @@ export class AgentSandbox {
     const overlays = new Map<string, { root: string; fs: OverlayFs }>();
     const mounts: { mountPoint: string; filesystem: OverlayFs }[] = [];
 
-    const realHome = home ? fs.realpathSync(home) : null;
-    const realProject = project ? fs.realpathSync(project) : null;
+    const realHome = home ? canonicalizeRealPath(home) : null;
+    const realProject = project ? canonicalizeRealPath(project) : null;
     const projectInsideHome =
       realHome &&
       realProject &&
@@ -179,11 +183,11 @@ export class AgentSandbox {
     };
     try {
       for (const target of changes.deletions) {
-        fs.rmSync(target, { recursive: true, force: true });
+        removeFromRealFs(target);
         record(target);
       }
       for (const write of changes.writes) {
-        applyWrite(write);
+        applyWriteToRealFs(write.path, write);
         record(write.path);
       }
     } finally {
@@ -228,28 +232,6 @@ export class AgentSandbox {
       overlay.reset();
     }
   }
-}
-
-/** Apply one write to the real filesystem. */
-function applyWrite(write: SandboxWrite): void {
-  if (write.nodeType === "directory") {
-    fs.mkdirSync(write.path, { recursive: true });
-    return;
-  }
-  fs.mkdirSync(nodePath.dirname(write.path), { recursive: true });
-  if (write.nodeType === "symlink") {
-    fs.rmSync(write.path, { force: true });
-    fs.symlinkSync(new TextDecoder().decode(write.content), write.path);
-    return;
-  }
-  if (!write.metadataOnly) {
-    fs.writeFileSync(write.path, write.content);
-  }
-  // Mode bits are advisory on Windows; apply them on POSIX only.
-  if (process.platform !== "win32") {
-    fs.chmodSync(write.path, write.mode);
-  }
-  fs.utimesSync(write.path, write.mtime, write.mtime);
 }
 
 /**

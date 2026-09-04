@@ -567,7 +567,8 @@ Agent harnesses need to know when a script uses commands the sandbox doesn't imp
 **Runtime reporting (always on).** Every `exec()` result lists command names that failed resolution, captured from anywhere in the script — subshells, pipelines, command substitutions, nested `bash -c`:
 
 ```typescript
-const result = await env.exec("grep -r foo src/ && git status");
+const bash = new Bash();
+const result = await bash.exec("grep -r foo src/ && git status");
 result.unresolvedCommands; // ["git"]
 result.exitCode;           // 0 — execution continued bash-style (the miss itself exited 127)
 ```
@@ -575,7 +576,8 @@ result.exitCode;           // 0 — execution continued bash-style (the miss its
 **Static pre-flight.** `analyzeCommands()` parses a script and reports which literal command names would fail resolution, without executing anything or modifying state. Useful for skipping doomed scripts before they cause side effects:
 
 ```typescript
-const analysis = await env.analyzeCommands("grep -r foo src/ && git status");
+const bash = new Bash();
+const analysis = await bash.analyzeCommands("grep -r foo src/ && git status");
 analysis.commands;    // ["grep", "git"]
 analysis.unresolved;  // ["git"]
 ```
@@ -595,10 +597,13 @@ result.unresolvedCommands; // ["git"]
 A typical harness runs a script entirely in the sandbox or entirely natively:
 
 ```typescript
-const analysis = await env.analyzeCommands(script);
+declare function rerunNatively(script: string): void;
+const bash = new Bash();
+const script = "grep -r foo src/ && git status";
+const analysis = await bash.analyzeCommands(script);
 if (analysis.unresolved.length === 0) {
-  const result = await env.exec(script);
-  if (result.unresolvedCommands.length > 0) rerunNatively(script);
+  const result = await bash.exec(script);
+  if (result.unresolvedCommands?.length) rerunNatively(script);
 } else {
   rerunNatively(script);
 }

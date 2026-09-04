@@ -147,8 +147,11 @@ describe("createAgentSandbox", () => {
     const sandbox = createAgentSandbox({ project: projectDir });
     await sandbox.exec("chmod +x src/app.ts");
     const changes = sandbox.diff();
-    expect(changes.writes).toHaveLength(1);
-    expect(changes.writes[0].metadataOnly).toBe(true);
+    // Exactly one metadataOnly write for the file (plus an ensured-parent
+    // directory write for src/ as scaffolding).
+    const meta = changes.writes.filter((w) => w.metadataOnly);
+    expect(meta).toHaveLength(1);
+    expect(meta[0].path).toBe(path.join(projectDir, "src/app.ts"));
 
     await sandbox.applyChanges(changes);
     expect(sandbox.diff()).toEqual({ writes: [], deletions: [] });
