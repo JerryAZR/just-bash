@@ -200,19 +200,71 @@ export class AgentSandbox {
   }
 
   /** Longest-prefix match of a real path onto a mounted overlay. */
-  private findOverlay(
+  private findOverlayEntry(
     realPath: string,
-  ): { root: string; fs: OverlayFs } | null {
-    let best: { root: string; fs: OverlayFs } | null = null;
-    for (const entry of this.overlays.values()) {
+  ): { mountPoint: string; root: string; fs: OverlayFs } | null {
+    let best: { mountPoint: string; root: string; fs: OverlayFs } | null = null;
+    for (const [mountPoint, entry] of this.overlays) {
       if (
         realPath === entry.root ||
         realPath.startsWith(entry.root + nodePath.sep)
       ) {
-        if (!best || entry.root.length > best.root.length) best = entry;
+        if (!best || entry.root.length > best.root.length) {
+          best = { mountPoint, root: entry.root, fs: entry.fs };
+        }
       }
     }
     return best;
+  }
+
+  /** Longest-prefix match of a real path onto a mounted overlay. */
+  private findOverlay(
+    realPath: string,
+  ): { root: string; fs: OverlayFs } | null {
+    return this.findOverlayEntry(realPath);
+  }
+
+  /**
+   * Map a real host path onto the overlay that shadows it: the virtual
+   * mount point, the OverlayFs, and the overlay-relative path (usable
+   * with overlay.exists/stat/readFile/diff). Returns null when the path
+   * is not under any mounted overlay's root. For the most robust match,
+   * pass a canonical path (e.g. from canonicalizeRealPath) — matching is
+   * by path prefix.
+   */
+  resolveRealPath(
+    realPath: string,
+  ): { mountPoint: string; overlay: OverlayFs; path: string } | null {
+    const found = this.findOverlayEntry(realPath);
+    if (!found) return null;
+    const rel = `/${nodePath
+      .relative(found.root, realPath)
+      .split(nodePath.sep)
+      .join("/")}`;
+    return { mountPoint: found.mountPoint, overlay: found.fs, path: rel };
+  }
+
+  /**
+   * Map a VFS path (as used with bash.fs, e.g. "/project/src/app.ts")
+   * onto the real host path it resolves to. Returns null when the path
+   * is not under any overlay mount (plain memory-backed VFS regions
+   * have no real counterpart).
+   */
+  toRealPath(vfsPath: string): string | null {
+    const normalized = vfsPath.startsWith("/") ? vfsPath : `/${vfsPath}`;
+    let best: { mountPoint: string; root: string } | null = null;
+    for (const [mountPoint, entry] of this.overlays) {
+      if (
+        normalized === mountPoint ||
+        normalized.startsWith(`${mountPoint}/`)
+      ) {
+        if (!best || mountPoint.length > best.mountPoint.length) {
+          best = { mountPoint, root: entry.root };
+        }
+      }
+    }
+    if (!best) return null;
+    return nodePath.join(best.root, normalized.slice(best.mountPoint.length));
   }
 
   /**

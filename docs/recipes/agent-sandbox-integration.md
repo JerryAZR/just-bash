@@ -73,6 +73,14 @@ const changes = sandbox.diff();
 - Applying mode bits only makes sense on POSIX — `applyChanges` skips
   `chmod` on Windows, where mode bits are advisory.
 
+To check a specific file instead of the whole set: `diff()` paths are
+real, so `changes.writes.some((w) => w.path === realFile)` answers "does
+this disk file have a pending write shadow?" For direct inspection,
+`sandbox.resolveRealPath(realFile)` maps it to
+`{ mountPoint, overlay, path }` — the overlay-relative path then works
+with `overlay.exists()`/`stat()`/`readFile()` — and
+`sandbox.toRealPath(vfsPath)` converts back.
+
 ## Out-of-band policy (read this before running agents on live projects)
 
 > OverlayFs does not detect changes made to the underlying directory

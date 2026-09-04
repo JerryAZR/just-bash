@@ -98,6 +98,39 @@ describe("createAgentSandbox", () => {
     expect(result.stdout).toBe(`/project\n/home/user\n`);
   });
 
+  it("converts between real and VFS paths", async () => {
+    const sandbox = createAgentSandbox({
+      home: homeDir,
+      project: projectDir,
+    });
+
+    // Real -> overlay-relative
+    const resolved = sandbox.resolveRealPath(
+      path.join(projectDir, "src", "app.ts"),
+    );
+    expect(resolved?.mountPoint).toBe("/project");
+    expect(resolved?.path).toBe("/src/app.ts");
+    // The overlay-relative path inspects the shadow directly.
+    await sandbox.exec("echo v2 > src/app.ts");
+    expect(await resolved?.overlay.exists("/src/app.ts")).toBe(true);
+    expect(await resolved?.overlay.readFile("/src/app.ts")).toBe("v2\n");
+
+    // Home maps too; unmounted regions have no overlay.
+    expect(
+      sandbox.resolveRealPath(path.join(homeDir, ".zshrc"))?.mountPoint,
+    ).toBe("/home/user");
+    expect(sandbox.resolveRealPath(os.tmpdir())).toBeNull();
+
+    // VFS -> real
+    expect(sandbox.toRealPath("/project/src/app.ts")).toBe(
+      path.join(projectDir, "src", "app.ts"),
+    );
+    expect(sandbox.toRealPath("/home/user/.zshrc")).toBe(
+      path.join(homeDir, ".zshrc"),
+    );
+    expect(sandbox.toRealPath("/tmp/scratch")).toBeNull();
+  });
+
   it("aborts on unresolved commands when the option is passed through", async () => {
     const sandbox = createAgentSandbox({
       project: projectDir,

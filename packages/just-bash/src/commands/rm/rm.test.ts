@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { InMemoryFs } from "../../fs/in-memory-fs/index.js";
+import { MountableFs } from "../../fs/mountable-fs/mountable-fs.js";
 
 describe("rm", () => {
   it("should remove file", async () => {
@@ -148,5 +150,41 @@ describe("rm", () => {
     await env.exec("rm file.txt");
     const cat = await env.exec("cat /home/user/file.txt");
     expect(cat.exitCode).toBe(1);
+  });
+});
+
+describe("rm -f with mount points (GNU parity: force suppresses only ENOENT)", () => {
+  const createMountedEnv = () => {
+    const vfs = new MountableFs({ base: new InMemoryFs() });
+    vfs.mount("/mnt/data", new InMemoryFs());
+    return new Bash({ fs: vfs, cwd: "/" });
+  };
+
+  it("reports EBUSY and fails under -f when removing a mount point", async () => {
+    const env = createMountedEnv();
+    await env.exec("echo x > /mnt/data/file.txt");
+    const result = await env.exec("rm -rf /mnt/data");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("/mnt/data");
+    expect(result.stderr).not.toBe("");
+    // Nothing was removed.
+    const check = await env.exec("cat /mnt/data/file.txt");
+    expect(check.stdout).toBe("x\n");
+  });
+
+  it("reports EBUSY and fails under -f when removing a mount's parent", async () => {
+    const env = createMountedEnv();
+    const result = await env.exec("rm -rf /mnt");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).not.toBe("");
+    const check = await env.exec("ls /mnt/data");
+    expect(check.exitCode).toBe(0);
+  });
+
+  it("still suppresses ENOENT silently under -f", async () => {
+    const env = createMountedEnv();
+    const result = await env.exec("rm -f /definitely-not-there.txt");
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
   });
 });

@@ -59,20 +59,26 @@ export const rmCommand: RuntimeCommand = {
           stdout += `removed '${path}'\n`;
         }
       } catch (error) {
-        if (!force) {
-          const message = getErrorMessage(error);
-          if (message.includes("ENOENT") || message.includes("no such file")) {
-            stderr += `rm: cannot remove '${path}': No such file or directory\n`;
-          } else if (
-            message.includes("ENOTEMPTY") ||
-            message.includes("not empty")
-          ) {
-            stderr += `rm: cannot remove '${path}': Directory not empty\n`;
-          } else {
-            stderr += `rm: cannot remove '${path}': ${sanitizeErrorMessage(message)}\n`;
-          }
-          exitCode = 1;
+        const message = getErrorMessage(error);
+        const isEnoent =
+          message.includes("ENOENT") || message.includes("no such file");
+        // GNU rm -f suppresses only "no such file" errors; everything
+        // else (mount-point EBUSY, permission, not-empty, ...) is
+        // reported even under force.
+        if (force && isEnoent) {
+          continue;
         }
+        if (isEnoent) {
+          stderr += `rm: cannot remove '${path}': No such file or directory\n`;
+        } else if (
+          message.includes("ENOTEMPTY") ||
+          message.includes("not empty")
+        ) {
+          stderr += `rm: cannot remove '${path}': Directory not empty\n`;
+        } else {
+          stderr += `rm: cannot remove '${path}': ${sanitizeErrorMessage(message)}\n`;
+        }
+        exitCode = 1;
       }
     }
 
