@@ -597,7 +597,9 @@ result.unresolvedCommands; // ["git"]
 A typical harness runs a script entirely in the sandbox or entirely natively:
 
 ```typescript
-declare function rerunNatively(script: string): void;
+const rerunNatively = (script: string): void => {
+  // Host-provided: run the script outside the sandbox.
+};
 const bash = new Bash();
 const script = "grep -r foo src/ && git status";
 const analysis = await bash.analyzeCommands(script);
