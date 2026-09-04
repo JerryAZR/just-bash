@@ -251,10 +251,28 @@ for (const rel of diff.deletions) {
 await overlay.sync(); // applied changes drop out of the pending set
 ```
 
+**`createAgentSandbox`** bundles the whole setup for the common agent case —
+InMemoryFs root, overlays over the real home and project directories, combined
+change sets with real absolute paths, and `applyChanges()` (apply + reconcile
+in one call):
+
+```typescript
+import { createAgentSandbox } from "just-bash";
+
+const sandbox = createAgentSandbox({
+  home: "/real/home",
+  project: "/real/project",
+  abortOnUnresolvedCommands: true,
+});
+const result = await sandbox.exec("echo hi > notes.txt");
+const changes = sandbox.diff(); // real paths
+await sandbox.applyChanges(changes); // host applies; pending set reconciles
+```
+
 See the [agent sandbox integration recipe](../../docs/recipes/agent-sandbox-integration.md)
 and `examples/agent-sandbox.mjs` for the full per-turn loop (static pre-flight,
-sandboxed exec, host-side apply, reconcile), including the out-of-band
-modification policy you must read before pointing this at a live project.
+sandboxed exec, host-side apply), including the out-of-band modification policy
+you must read before pointing this at a live project.
 
 **ReadWriteFs** - Direct read-write access to a real directory. Use this if you want the agent to be able to write to your disk:
 

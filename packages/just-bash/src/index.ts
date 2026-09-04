@@ -1,4 +1,12 @@
 // AST types (for plugin authors)
+
+export {
+  AgentSandbox,
+  type AgentSandboxOptions,
+  createAgentSandbox,
+  type SandboxChangeSet,
+  type SandboxWrite,
+} from "./agent-sandbox.js";
 export type {
   CommandNode,
   PipelineNode,

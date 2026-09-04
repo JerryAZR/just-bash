@@ -1,0 +1,225 @@
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
+import { Bash, type BashOptions } from "./Bash.js";
+import { InMemoryFs } from "./fs/in-memory-fs/index.js";
+import { MountableFs } from "./fs/mountable-fs/mountable-fs.js";
+import type { OverlayWrite } from "./fs/overlay-fs/index.js";
+import { OverlayFs } from "./fs/overlay-fs/index.js";
+import type { BashExecResult, CommandAnalysis } from "./types.js";
+
+/**
+ * Options for {@link createAgentSandbox}. All BashOptions except `fs` and
+ * `cwd` are passed through unchanged.
+ */
+export interface AgentSandboxOptions
+  extends Omit<BashOptions, "fs" | "cwd" | "files"> {
+  /**
+   * Real directory exposed as the agent's home (virtual `/home/user`),
+   * copy-on-write. When omitted, home is plain throwaway memory.
+   */
+  home?: string;
+  /**
+   * Real project directory. When inside `home` it is covered by the home
+   * overlay (cwd maps to the virtual subpath); otherwise it gets its own
+   * overlay mounted at virtual `/project`. When omitted, cwd defaults to
+   * `/home/user`.
+   */
+  project?: string;
+  /** Virtual working directory. Defaults to the project mount or home. */
+  cwd?: string;
+}
+
+/** A single write in a sandbox change set, addressed by real host path. */
+export interface SandboxWrite extends Omit<OverlayWrite, "path"> {
+  /** Real absolute path on the host, ready for the host to apply. */
+  path: string;
+}
+
+/** The combined pending change set across all of the sandbox's overlays. */
+export interface SandboxChangeSet {
+  /** Pending writes, sorted by real path. */
+  writes: SandboxWrite[];
+  /** Pending deletions (top-most only), as real absolute paths, sorted. */
+  deletions: string[];
+}
+
+/**
+ * A ready-made agent sandbox: InMemoryFs virtual root, copy-on-write
+ * OverlayFs over the real home directory (and over the project directory
+ * when it lives outside home), and a per-turn change-set workflow with
+ * real-absolute paths:
+ *
+ * ```ts
+ * const sandbox = createAgentSandbox({
+ *   home: os.homedir(),
+ *   project: projectDir,
+ *   abortOnUnresolvedCommands: true,
+ * });
+ * await sandbox.analyzeCommands(script);   // static pre-flight
+ * const result = await sandbox.exec(script); // sandboxed; writes in memory
+ * const changes = sandbox.diff();            // real paths, reviewable
+ * await sandbox.applyChanges(changes);       // host applies + auto-sync
+ * ```
+ *
+ * The sandbox never writes to the underlying directories by itself.
+ * `applyChanges` is the only disk-writing operation, and it is always an
+ * explicit host call. See docs/recipes/agent-sandbox-integration.md,
+ * including the out-of-band modification policy.
+ */
+export class AgentSandbox {
+  /** The underlying Bash instance (escape hatch for advanced use). */
+  readonly bash: Bash;
+  /** The overlays backing this sandbox, keyed by virtual mount point. */
+  readonly overlays: ReadonlyMap<string, { root: string; fs: OverlayFs }>;
+
+  constructor(options: AgentSandboxOptions = {}) {
+    const { home, project, cwd, env, ...bashOptions } = options;
+    const overlays = new Map<string, { root: string; fs: OverlayFs }>();
+    const mounts: { mountPoint: string; filesystem: OverlayFs }[] = [];
+
+    const realHome = home ? fs.realpathSync(home) : null;
+    const realProject = project ? fs.realpathSync(project) : null;
+    const projectInsideHome =
+      realHome &&
+      realProject &&
+      (() => {
+        const rel = nodePath.relative(realHome, realProject);
+        // Cross-drive on Windows yields an absolute relative path.
+        return (
+          rel !== ".." &&
+          !rel.startsWith(`..${nodePath.sep}`) &&
+          !nodePath.isAbsolute(rel)
+        );
+      })();
+
+    if (realHome) {
+      const overlay = new OverlayFs({ root: realHome, mountPoint: "/" });
+      overlays.set("/home/user", { root: realHome, fs: overlay });
+      mounts.push({ mountPoint: "/home/user", filesystem: overlay });
+    }
+    let defaultCwd = "/home/user";
+    if (realProject) {
+      if (projectInsideHome && realHome) {
+        const rel = nodePath.relative(realHome, realProject);
+        defaultCwd = rel
+          ? `/home/user/${rel.split(nodePath.sep).join("/")}`
+          : "/home/user";
+      } else {
+        const overlay = new OverlayFs({ root: realProject, mountPoint: "/" });
+        overlays.set("/project", { root: realProject, fs: overlay });
+        mounts.push({ mountPoint: "/project", filesystem: overlay });
+        defaultCwd = "/project";
+      }
+    }
+
+    const vfs = new MountableFs({ base: new InMemoryFs(), mounts });
+    this.overlays = overlays;
+    this.bash = new Bash({
+      ...bashOptions,
+      env: { HOME: "/home/user", ...env },
+      cwd: cwd ?? defaultCwd,
+      fs: vfs,
+    });
+  }
+
+  /** Statically analyze a script's command usage (see Bash.analyzeCommands). */
+  analyzeCommands(script: string): Promise<CommandAnalysis> {
+    return this.bash.analyzeCommands(script);
+  }
+
+  /** Execute a script in the sandbox. Writes stay in memory. */
+  exec(script: string): Promise<BashExecResult> {
+    return this.bash.exec(script);
+  }
+
+  /**
+   * The combined pending change set across all overlays, with real
+   * absolute host paths (each overlay's root-relative paths joined onto
+   * its real root). Sorted by path for deterministic review.
+   */
+  diff(): SandboxChangeSet {
+    const writes: SandboxWrite[] = [];
+    const deletions: string[] = [];
+    for (const { root, fs: overlay } of this.overlays.values()) {
+      const diff = overlay.diff();
+      for (const { path: rel, ...write } of diff.writes) {
+        writes.push({ ...write, path: nodePath.join(root, rel) });
+      }
+      for (const rel of diff.deletions) {
+        deletions.push(nodePath.join(root, rel));
+      }
+    }
+    writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    deletions.sort();
+    return { writes, deletions };
+  }
+
+  /**
+   * Apply a change set to the real directories, then reconcile: applied
+   * changes drop out of the pending set automatically (sync runs
+   * internally), so there is no separate sync step in the per-turn loop.
+   *
+   * Pass a filtered subset to reject changes — anything not applied stays
+   * pending (review again or discard with reset()). Fails hard on the
+   * first apply error; already-applied entries then remain pending, so a
+   * retry is safe.
+   */
+  async applyChanges(changes: SandboxChangeSet = this.diff()): Promise<void> {
+    for (const target of changes.deletions) {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+    for (const write of changes.writes) {
+      applyWrite(write);
+    }
+    await this.sync();
+  }
+
+  /**
+   * Reconcile all overlays with disk: drop pending entries that now match,
+   * keep the rest. Also the supported re-baseline after intentional
+   * out-of-band changes to the underlying directories.
+   */
+  async sync(): Promise<void> {
+    for (const { fs: overlay } of this.overlays.values()) {
+      await overlay.sync();
+    }
+  }
+
+  /** Discard all pending changes in every overlay (trust-disk re-baseline). */
+  reset(): void {
+    for (const { fs: overlay } of this.overlays.values()) {
+      overlay.reset();
+    }
+  }
+}
+
+/** Apply one write to the real filesystem. */
+function applyWrite(write: SandboxWrite): void {
+  if (write.nodeType === "directory") {
+    fs.mkdirSync(write.path, { recursive: true });
+    return;
+  }
+  fs.mkdirSync(nodePath.dirname(write.path), { recursive: true });
+  if (write.nodeType === "symlink") {
+    fs.rmSync(write.path, { force: true });
+    fs.symlinkSync(new TextDecoder().decode(write.content), write.path);
+    return;
+  }
+  if (!write.metadataOnly) {
+    fs.writeFileSync(write.path, write.content);
+  }
+  // Mode bits are advisory on Windows; apply them on POSIX only.
+  if (process.platform !== "win32") {
+    fs.chmodSync(write.path, write.mode);
+  }
+  fs.utimesSync(write.path, write.mtime, write.mtime);
+}
+
+/**
+ * Create a ready-made agent sandbox. See {@link AgentSandbox}.
+ */
+export function createAgentSandbox(
+  options: AgentSandboxOptions = {},
+): AgentSandbox {
+  return new AgentSandbox(options);
+}
