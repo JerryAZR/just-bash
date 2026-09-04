@@ -136,9 +136,9 @@ describe("Agent Scenario: Sandboxed Host Sync", () => {
     // ...until the host discards it explicitly.
     homeOverlay.reset();
     expect(homeOverlay.diff()).toEqual({ writes: [], deletions: [] });
-    expect(
-      fs.existsSync(path.join(homeDir, ".config/credentials")),
-    ).toBe(false);
+    expect(fs.existsSync(path.join(homeDir, ".config/credentials"))).toBe(
+      false,
+    );
   });
 
   it("gates unsupported commands: static analysis, then the runtime backstop", async () => {
