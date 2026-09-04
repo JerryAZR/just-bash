@@ -10,7 +10,7 @@
  *   2. --json:  --json '{"key":"value"}'
  *   3. stdin:   echo '{"key":"value"}' | namespace command
  */
-import { decodeBytesToUtf8, } from "just-bash";
+import { decodeBytesToUtf8, } from "@jerryan/just-bash";
 // ── Naming ──────────────────────────────────────────────────────
 /**
  * Convert camelCase to kebab-case.

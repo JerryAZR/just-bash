@@ -1,5 +1,12 @@
 # @just-bash/executor
 
+## 6.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`942abb1`](https://github.com/JerryAZR/just-bash/commit/942abb1a41b836757d98a7a47c9c85633b0455ad)]:
+  - @jerryan/just-bash@3.6.0
+
 ## 5.0.2
 
 ### Patch Changes

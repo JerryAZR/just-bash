@@ -1,5 +1,13 @@
 # just-bash
 
+## 3.6.0
+
+### Minor Changes
+
+- [`942abb1`](https://github.com/JerryAZR/just-bash/commit/942abb1a41b836757d98a7a47c9c85633b0455ad) Thanks [@JerryAZR](https://github.com/JerryAZR)! - `rm -f` now suppresses only ENOENT errors, matching GNU rm: mount-point (EBUSY) and other failures are reported and exit 1 instead of being silently swallowed. Previously `rm -rf` on a mount point or its parent was a silent no-op with exit 0, while the change set correctly showed nothing had been deleted.
+
+  `AgentSandbox` gains path conversion helpers: `resolveRealPath(realPath)` maps a real host path to `{ mountPoint, overlay, path }` for direct shadow inspection on the overlay, and `toRealPath(vfsPath)` maps a VFS path to its real host path. Both return null for paths outside the mounted overlays.
+
 ## 3.4.2
 
 ### Patch Changes
