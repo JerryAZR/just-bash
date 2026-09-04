@@ -59,7 +59,8 @@
     "just-bash-shell": "./dist/bin/shell/shell.js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "rm -rf dist && tsc && pnpm build:lib && pnpm build:lib:cjs && pnpm build:browser && pnpm build:cli && pnpm build:shell && pnpm build:worker && pnpm build:clean && cp dist/index.d.ts dist/index.d.cts && sed '1,/^-->/d' AGENTS.npm.md > dist/AGENTS.md",
