@@ -11,6 +11,7 @@ describe("js-exec child_process sub-shell", () => {
         `js-exec -c "const cp = require('child_process'); console.log(cp.execSync('echo hello').trim())"`,
       );
       expect(result.stdout).toBe("hello\n");
+      expect(result.stderr).toBe("");
       expect(result.exitCode).toBe(0);
     },
   );
@@ -21,6 +22,7 @@ describe("js-exec child_process sub-shell", () => {
       `js-exec -c "const cp = require('child_process'); const r = cp.spawnSync('false'); console.log(r.status)"`,
     );
     expect(result.stdout).toBe("1\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -30,6 +32,7 @@ describe("js-exec child_process sub-shell", () => {
       `js-exec -c "const cp = require('child_process'); const r = cp.spawnSync('echo', ['error', '>&2']); console.log(typeof r.stderr)"`,
     );
     expect(result.stdout).toBe("string\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -39,6 +42,7 @@ describe("js-exec child_process sub-shell", () => {
       `js-exec -c "const cp = require('child_process'); try { cp.execSync('false'); } catch(e) { console.log('caught:', e.status); }"`,
     );
     expect(result.stdout).toBe("caught: 1\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -48,6 +52,7 @@ describe("js-exec child_process sub-shell", () => {
       `js-exec -c "const cp = require('child_process'); console.log(cp.execSync('echo abc | tr a-z A-Z').trim())"`,
     );
     expect(result.stdout).toBe("ABC\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -66,6 +71,7 @@ console.log(r.stderr.trim());
       });
       const result = await env.exec("js-exec /home/user/reentrant.js");
       expect(result.stdout).toContain("recursive invocation is not supported");
+      expect(result.stderr).toBe("");
       expect(result.exitCode).toBe(0);
     },
   );

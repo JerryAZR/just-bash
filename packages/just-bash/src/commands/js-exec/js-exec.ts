@@ -18,7 +18,10 @@ import {
 import { mapToRecord } from "../../helpers/env.js";
 import { getErrorMessage } from "../../interpreter/helpers/errors.js";
 import { DefenseInDepthBox } from "../../security/defense-in-depth-box.js";
-import { _clearTimeout, _setTimeout } from "../../timers.js";
+import {
+  _clearTimeout,
+  _setTimeoutUnbound,
+} from "../../timers.js";
 import type {
   CommandExecOptions,
   ExecResult,
@@ -226,6 +229,17 @@ const executionQueue: QueuedExecution[] = [];
 let currentExecution: QueuedExecution | null = null;
 let workerInitializationFailure: string | null = null;
 const WORKER_TERMINATION_ACK_MS = 1_000;
+let workerIdleTimeoutMs = 5_000;
+
+/** @internal Set the idle-teardown delay — for focused lifecycle tests only. */
+export function _setJsExecWorkerIdleTimeoutMsForTests(ms: number): void {
+  workerIdleTimeoutMs = ms;
+}
+
+/** @internal Whether the shared worker is currently alive — for tests only. */
+export function _hasSharedJsExecWorkerForTests(): boolean {
+  return sharedWorker !== null;
+}
 
 function terminateOwnedWorker(
   owner: QueuedExecution,
@@ -261,7 +275,7 @@ function terminateOwnedWorker(
     currentExecution = null;
     processNextExecution();
   };
-  const timer = _setTimeout(() => {
+  const timer = _setTimeoutUnbound(() => {
     failClosed();
   }, WORKER_TERMINATION_ACK_MS);
   void owner.controller
@@ -486,13 +500,16 @@ function getOrCreateWorker(): Worker {
 }
 
 function scheduleWorkerTermination(): void {
-  // Terminate worker after 5 seconds of inactivity
-  workerIdleTimeout = _setTimeout(() => {
+  // Terminate worker after 5 seconds of inactivity. This timer MUST NOT
+  // bind to the scheduling execution's defense context: the callback runs
+  // after that execution has deactivated, and a bound callback would be
+  // silently suppressed, leaking the worker (and its handles) forever.
+  workerIdleTimeout = _setTimeoutUnbound(() => {
     if (sharedWorker && !currentExecution && executionQueue.length === 0) {
       sharedWorker.terminate();
       sharedWorker = null;
     }
-  }, 5000);
+  }, workerIdleTimeoutMs);
 }
 
 /**

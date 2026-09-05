@@ -77,6 +77,7 @@ console.log(result);
     });
     const result = await env.exec("js-exec /home/user/main.mts");
     expect(result.stdout).toBe("3\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
@@ -125,6 +126,7 @@ console.log(cfg.host + ":" + cfg.port);
     });
     const result = await env.exec("js-exec /home/user/app.ts");
     expect(result.stdout).toBe("localhost:8080\n");
+    expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
   });
 });
