@@ -18,10 +18,7 @@ import {
 import { mapToRecord } from "../../helpers/env.js";
 import { getErrorMessage } from "../../interpreter/helpers/errors.js";
 import { DefenseInDepthBox } from "../../security/defense-in-depth-box.js";
-import {
-  _clearTimeout,
-  _setTimeoutUnbound,
-} from "../../timers.js";
+import { _clearTimeout, _setTimeoutUnbound } from "../../timers.js";
 import type {
   CommandExecOptions,
   ExecResult,
