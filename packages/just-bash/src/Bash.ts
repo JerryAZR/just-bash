@@ -363,6 +363,15 @@ export class Bash {
       },
       options.executionLimitProfile,
     );
+    if (options.fs && options.files) {
+      // options.files only feeds the default InMemoryFs; with a custom fs
+      // it is silently ignored. Fail loudly rather than let the caller
+      // believe the files exist (a missing-file bug in their setup).
+      throw new Error(
+        "Bash: options.files is ignored when options.fs is provided; " +
+          "write the files into your filesystem directly or drop options.fs",
+      );
+    }
     const fs =
       options.fs ??
       new InMemoryFs(options.files, {

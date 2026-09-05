@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "./Bash.js";
+import { InMemoryFs } from "./fs/in-memory-fs/index.js";
 
 describe("Bash General", () => {
   describe("pipes", () => {
@@ -627,6 +628,18 @@ describe("Bash General", () => {
       const result = await env.exec("ls /home/user");
       expect(result.exitCode).not.toBe(0); // /home/user doesn't exist
       expect(result.stderr).toContain("No such file or directory");
+    });
+  });
+
+  describe("constructor option validation", () => {
+    it("throws when both fs and files are provided (files would be ignored)", () => {
+      expect(
+        () =>
+          new Bash({
+            fs: new InMemoryFs(),
+            files: { "/secret.txt": "x" },
+          }),
+      ).toThrow(/options\.files is ignored when options\.fs is provided/);
     });
   });
 });

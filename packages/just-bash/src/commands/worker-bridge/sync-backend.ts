@@ -32,7 +32,12 @@ export class SyncBackend {
     data?: Uint8Array,
     flags = 0,
     mode = 0,
-  ): { success: boolean; result?: Uint8Array; error?: string } {
+  ): {
+    success: boolean;
+    result?: Uint8Array;
+    error?: string;
+    errorCode?: number;
+  } {
     this.protocol.reset();
     this.protocol.setOpCode(opCode);
     this.protocol.setPath(path);
@@ -81,7 +86,21 @@ export class SyncBackend {
         // must identify the exact protocol state.
         `bridge protocol violation: op ${opCode} woke with status ${status} ` +
           `(wait=${waitResult}, errorCode=${this.protocol.getErrorCode()})`,
+      errorCode: this.protocol.getErrorCode(),
     };
+  }
+
+  /** Build an op failure that preserves the bridge's numeric error code,
+   * so downstream errno mapping prefers it over substring matching. */
+  private opError_(
+    fallback: string,
+    result: { error?: string; errorCode?: number },
+  ): Error {
+    const err = new Error(result.error || fallback) as Error & {
+      bridgeErrorCode?: number;
+    };
+    err.bridgeErrorCode = result.errorCode;
+    return err;
   }
 
   readFile(path: string): Uint8Array {
@@ -91,7 +110,7 @@ export class SyncBackend {
     if (size <= Size.DATA_BUFFER) {
       const result = this.execSync(OpCode.READ_FILE, path);
       if (!result.success) {
-        throw new Error(result.error || "Failed to read file");
+        throw this.opError_("Failed to read file", result);
       }
       return result.result ?? new Uint8Array(0);
     }
@@ -107,7 +126,7 @@ export class SyncBackend {
         length,
       );
       if (!result.success) {
-        throw new Error(result.error || "Failed to read file");
+        throw this.opError_("Failed to read file", result);
       }
       const chunk = result.result ?? new Uint8Array(0);
       content.set(chunk, offset);
@@ -121,7 +140,7 @@ export class SyncBackend {
     if (data.length <= Size.DATA_BUFFER) {
       const result = this.execSync(OpCode.WRITE_FILE, path, data);
       if (!result.success) {
-        throw new Error(result.error || "Failed to write file");
+        throw this.opError_("Failed to write file", result);
       }
       return;
     }
@@ -137,7 +156,7 @@ export class SyncBackend {
         offset,
       );
       if (!result.success) {
-        throw new Error(result.error || "Failed to write file");
+        throw this.opError_("Failed to write file", result);
       }
       offset += chunk.length;
     }
@@ -153,7 +172,7 @@ export class SyncBackend {
   } {
     const result = this.execSync(OpCode.STAT, path);
     if (!result.success) {
-      throw new Error(result.error || "Failed to stat");
+      throw this.opError_("Failed to stat", result);
     }
     return this.protocol.decodeStat();
   }
@@ -168,7 +187,7 @@ export class SyncBackend {
   } {
     const result = this.execSync(OpCode.LSTAT, path);
     if (!result.success) {
-      throw new Error(result.error || "Failed to lstat");
+      throw this.opError_("Failed to lstat", result);
     }
     return this.protocol.decodeStat();
   }
@@ -176,7 +195,7 @@ export class SyncBackend {
   readdir(path: string): string[] {
     const result = this.execSync(OpCode.READDIR, path);
     if (!result.success) {
-      throw new Error(result.error || "Failed to readdir");
+      throw this.opError_("Failed to readdir", result);
     }
     return JSON.parse(this.protocol.getResultAsString());
   }
@@ -185,7 +204,7 @@ export class SyncBackend {
     const flags = recursive ? Flags.MKDIR_RECURSIVE : 0;
     const result = this.execSync(OpCode.MKDIR, path, undefined, flags);
     if (!result.success) {
-      throw new Error(result.error || "Failed to mkdir");
+      throw this.opError_("Failed to mkdir", result);
     }
   }
 
@@ -195,7 +214,7 @@ export class SyncBackend {
     if (force) flags |= Flags.FORCE;
     const result = this.execSync(OpCode.RM, path, undefined, flags);
     if (!result.success) {
-      throw new Error(result.error || "Failed to rm");
+      throw this.opError_("Failed to rm", result);
     }
   }
 
@@ -210,7 +229,7 @@ export class SyncBackend {
   appendFile(path: string, data: Uint8Array): void {
     const result = this.execSync(OpCode.APPEND_FILE, path, data);
     if (!result.success) {
-      throw new Error(result.error || "Failed to append file");
+      throw this.opError_("Failed to append file", result);
     }
   }
 
@@ -218,14 +237,14 @@ export class SyncBackend {
     const targetData = new TextEncoder().encode(target);
     const result = this.execSync(OpCode.SYMLINK, linkPath, targetData);
     if (!result.success) {
-      throw new Error(result.error || "Failed to symlink");
+      throw this.opError_("Failed to symlink", result);
     }
   }
 
   readlink(path: string): string {
     const result = this.execSync(OpCode.READLINK, path);
     if (!result.success) {
-      throw new Error(result.error || "Failed to readlink");
+      throw this.opError_("Failed to readlink", result);
     }
     return this.protocol.getResultAsString();
   }
@@ -233,14 +252,14 @@ export class SyncBackend {
   chmod(path: string, mode: number): void {
     const result = this.execSync(OpCode.CHMOD, path, undefined, 0, mode);
     if (!result.success) {
-      throw new Error(result.error || "Failed to chmod");
+      throw this.opError_("Failed to chmod", result);
     }
   }
 
   realpath(path: string): string {
     const result = this.execSync(OpCode.REALPATH, path);
     if (!result.success) {
-      throw new Error(result.error || "Failed to realpath");
+      throw this.opError_("Failed to realpath", result);
     }
     return this.protocol.getResultAsString();
   }
@@ -249,7 +268,7 @@ export class SyncBackend {
     const newPathData = new TextEncoder().encode(newPath);
     const result = this.execSync(OpCode.RENAME, oldPath, newPathData);
     if (!result.success) {
-      throw new Error(result.error || "Failed to rename");
+      throw this.opError_("Failed to rename", result);
     }
   }
 
@@ -257,7 +276,7 @@ export class SyncBackend {
     const destData = new TextEncoder().encode(dest);
     const result = this.execSync(OpCode.COPY_FILE, src, destData);
     if (!result.success) {
-      throw new Error(result.error || "Failed to copyFile");
+      throw this.opError_("Failed to copyFile", result);
     }
   }
 
@@ -265,7 +284,7 @@ export class SyncBackend {
     const encoded = new TextEncoder().encode(data);
     const result = this.execSync(OpCode.WRITE_STDOUT, "", encoded);
     if (!result.success) {
-      throw new Error(result.error || "Failed to write stdout");
+      throw this.opError_("Failed to write stdout", result);
     }
   }
 
@@ -273,7 +292,7 @@ export class SyncBackend {
     const encoded = new TextEncoder().encode(data);
     const result = this.execSync(OpCode.WRITE_STDERR, "", encoded);
     if (!result.success) {
-      throw new Error(result.error || "Failed to write stderr");
+      throw this.opError_("Failed to write stderr", result);
     }
   }
 
@@ -305,7 +324,7 @@ export class SyncBackend {
       : undefined;
     const result = this.execSync(OpCode.HTTP_REQUEST, url, requestData);
     if (!result.success) {
-      throw new Error(result.error || "HTTP request failed");
+      throw this.opError_("HTTP request failed", result);
     }
     const responseJson = new TextDecoder().decode(result.result);
     const parsed = JSON.parse(responseJson) as {
@@ -344,7 +363,7 @@ export class SyncBackend {
       : undefined;
     const result = this.execSync(OpCode.EXEC_COMMAND, command, requestData);
     if (!result.success) {
-      throw new Error(result.error || "Command execution failed");
+      throw this.opError_("Command execution failed", result);
     }
     const responseJson = new TextDecoder().decode(result.result);
     return JSON.parse(responseJson);
@@ -365,7 +384,7 @@ export class SyncBackend {
     const requestData = new TextEncoder().encode(JSON.stringify({ args }));
     const result = this.execSync(OpCode.EXEC_COMMAND, command, requestData);
     if (!result.success) {
-      throw new Error(result.error || "Command execution failed");
+      throw this.opError_("Command execution failed", result);
     }
     const responseJson = new TextDecoder().decode(result.result);
     return JSON.parse(responseJson);
@@ -381,7 +400,7 @@ export class SyncBackend {
       : undefined;
     const result = this.execSync(OpCode.INVOKE_TOOL, path, requestData);
     if (!result.success) {
-      throw new Error(result.error || "Tool invocation failed");
+      throw this.opError_("Tool invocation failed", result);
     }
     return new TextDecoder().decode(result.result);
   }

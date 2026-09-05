@@ -3,6 +3,7 @@ import { InMemoryFs } from "../../fs/in-memory-fs/in-memory-fs.js";
 import { BridgeHandler } from "./bridge-handler.js";
 import {
   createSharedBuffer,
+  ErrorCode,
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
@@ -122,6 +123,33 @@ describe("ranged bridge ops", () => {
       // File untouched.
       const full = await sendOp(protocol, OpCode.READ_FILE, { path: "/f.bin" });
       expect(full.result.length).toBe(10);
+    } finally {
+      handler.stop();
+      await run;
+    }
+  });
+
+  it("publishes a numeric error code for backend failures", async () => {
+    class DenyReadFs extends InMemoryFs {
+      override async readFileBuffer(path: string): Promise<Uint8Array> {
+        if (path === "/secret.txt") {
+          throw new Error("EACCES: permission denied");
+        }
+        return super.readFileBuffer(path);
+      }
+    }
+    const fs = new DenyReadFs();
+    await fs.writeFile("/secret.txt", "x");
+    const shared = createSharedBuffer();
+    const protocol = new ProtocolBuffer(shared);
+    const handler = new BridgeHandler(shared, fs, "/", "test-cmd");
+    const run = handler.run(10_000);
+    try {
+      const res = await sendOp(protocol, OpCode.READ_FILE, {
+        path: "/secret.txt",
+      });
+      expect(res.status).toBe(Status.ERROR);
+      expect(protocol.getErrorCode()).toBe(ErrorCode.PERMISSION_DENIED);
     } finally {
       handler.stop();
       await run;
