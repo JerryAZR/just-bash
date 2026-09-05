@@ -920,7 +920,12 @@ export class OverlayFs implements IFileSystem {
       existingBuffer = new Uint8Array(0);
     }
 
-    // Re-descend after the async read: a concurrent exec may have
+    // Resolve the mode BEFORE the final gate: every remaining await must
+    // happen here, because any yield between the re-descend and the
+    // attach reopens the race this gate exists to close.
+    const mode = await this.inheritedMode(normalized);
+
+    // Re-descend after the async work: a concurrent exec may have
     // created an upper node for this path while our read was in flight.
     // Appending onto it is mandatory — attaching over it would silently
     // drop the other exec's chunk (POSIX O_APPEND must not lose data).
@@ -930,12 +935,13 @@ export class OverlayFs implements IFileSystem {
       return;
     }
 
+    // Sync from here to the attach — atomic with the gate above.
     this.ensureParentDirs(normalized);
     this.tree.attach(normalized, {
       type: "file",
       content: existingBuffer,
       appendChunks: [newBuffer],
-      mode: await this.inheritedMode(normalized),
+      mode,
       mtime: new Date(),
     });
   }
@@ -949,13 +955,23 @@ export class OverlayFs implements IFileSystem {
     originalPath: string,
   ): Promise<void> {
     if (node.metacopy) {
-      // Complete the copy-up: lower data + append chunk, preserving the
-      // metacopy node's mode.
       const base = await this.readLowerFileBytes(
         normalized,
         originalPath,
         new Set(),
       );
+      // Re-descend after the copy-up read: a concurrent exec may have
+      // completed its own copy-up or appended meanwhile.
+      const raced = this.tree.descend(normalized);
+      if (
+        raced.kind === "found" &&
+        raced.node.type === "file" &&
+        !raced.node.metacopy
+      ) {
+        this.tree.appendChunk(raced.node, newBuffer);
+        raced.node.mtime = new Date();
+        return;
+      }
       this.tree.attach(normalized, {
         type: "file",
         content: base,
