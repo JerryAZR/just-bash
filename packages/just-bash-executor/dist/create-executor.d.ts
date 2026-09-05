@@ -9,7 +9,7 @@
  *   - `sdk?`: the SDK handle when `setup` was provided, exposed for advanced
  *     use (e.g. listing sources)
  */
-import type { Command } from "just-bash";
+import type { Command } from "@jerryan/just-bash";
 import type { ExecutorConfig, ExecutorSDKHandle } from "./types.js";
 export interface ExecutorHandle {
     /** Bash namespace commands; pass to `new Bash({ customCommands })`. */
