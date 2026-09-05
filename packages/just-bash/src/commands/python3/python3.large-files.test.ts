@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { InMemoryFs } from "../../fs/in-memory-fs/index.js";
 
 // The bridge protocol's data buffer is 8MB; files larger than that are
 // now read and written in ranged chunks, transparent to the guest.
@@ -54,6 +55,62 @@ except OSError as e:
     );
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe("IsADirectoryError\n");
+    expect(result.exitCode).toBe(0);
+  }, 60_000);
+
+  it("fails at open(), not late at close, when write-opening a directory", async () => {
+    // The old open() catch swallowed every backend read error as
+    // 'empty new file' for O_CREAT writes: an EISDIR surfaced only at
+    // close() flush time. Real CPython raises IsADirectoryError at open.
+    const env = new Bash({
+      python: true,
+      files: { "/data/f.txt": "x" },
+    });
+    const result = await env.exec(
+      `python3 -c "
+try:
+    f = open('/data', 'wb')
+    print('open succeeded (wrong)')
+    f.close()
+except IsADirectoryError:
+    print('IsADirectoryError at open')
+"`,
+    );
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("IsADirectoryError at open\n");
+    expect(result.exitCode).toBe(0);
+  }, 60_000);
+
+  it("maps non-ENOENT backend errors honestly (fault-injected EACCES)", async () => {
+    // Deterministic trigger for the open() catch: a backend read failure
+    // that is NOT a missing file. The old blanket ENOENT turned this
+    // into FileNotFoundError; the fix surfaces PermissionError.
+    class DenyReadFs extends InMemoryFs {
+      override async readFileBuffer(path: string): Promise<Uint8Array> {
+        if (path === "/secret.txt") {
+          throw new Error("EACCES: permission denied");
+        }
+        return super.readFileBuffer(path);
+      }
+    }
+    const fs = new DenyReadFs();
+    await fs.writeFile("/secret.txt", "x");
+    const env = new Bash({ python: true, fs });
+    const result = await env.exec(
+      `python3 -c "
+try:
+    open('/secret.txt', 'rb').read()
+    print('NO ERROR')
+except PermissionError:
+    print('PermissionError')
+except FileNotFoundError:
+    print('FileNotFoundError (the lie)')
+except OSError as e:
+    print('OSError', e.errno)
+"`,
+    );
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("PermissionError\n");
     expect(result.exitCode).toBe(0);
   }, 60_000);
 });
