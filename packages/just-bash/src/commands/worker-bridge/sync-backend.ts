@@ -44,8 +44,25 @@ export class SyncBackend {
     this.protocol.setStatus(Status.READY);
     this.protocol.notify();
 
-    // Wait for main thread to process (with timeout)
-    const waitResult = this.protocol.waitForResult(this.operationTimeoutMs);
+    // Wait for main thread to process (with timeout). READY-after-wake is
+    // a spurious notify, not a result: bridgeHandler.stop() writes READY
+    // and notifies to wake the HOST loop during cancel/abort, and
+    // Atomics.notify wakes the worker's wait even though the value did
+    // not change. Re-wait for the real result; a genuine cancel still
+    // wins via worker termination or the operation timeout backstop.
+    const deadline = Date.now() + this.operationTimeoutMs;
+    let waitResult = this.protocol.waitForResult(this.operationTimeoutMs);
+    while (
+      waitResult !== "timed-out" &&
+      this.protocol.getStatus() === Status.READY
+    ) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        waitResult = "timed-out";
+        break;
+      }
+      waitResult = this.protocol.waitForResult(remaining);
+    }
     if (waitResult === "timed-out") {
       return { success: false, error: "Operation timed out" };
     }
@@ -58,7 +75,11 @@ export class SyncBackend {
       success: false,
       error:
         this.protocol.getResultAsString() ||
-        `Error code: ${this.protocol.getErrorCode()}`,
+        // Impossible by construction: every host error path publishes a
+        // code and message. If this ever fires, the diagnostic payload
+        // must identify the exact protocol state.
+        `bridge protocol violation: op ${opCode} woke with status ${status} ` +
+          `(wait=${waitResult}, errorCode=${this.protocol.getErrorCode()})`,
     };
   }
 
