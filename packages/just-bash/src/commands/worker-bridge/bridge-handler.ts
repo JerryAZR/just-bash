@@ -166,6 +166,12 @@ export class BridgeHandler {
         case OpCode.MKDIR:
           await this.handleMkdir();
           break;
+        case OpCode.READ_FILE_RANGE:
+          await this.handleReadFileRange();
+          break;
+        case OpCode.WRITE_FILE_RANGE:
+          await this.handleWriteFileRange();
+          break;
         case OpCode.RM:
           await this.handleRm();
           break;
@@ -229,6 +235,43 @@ export class BridgeHandler {
     try {
       const content = await this.fs.readFileBuffer(path);
       this.protocol.setResult(content);
+      this.protocol.setStatus(Status.SUCCESS);
+    } catch (e) {
+      this.setErrorFromException(e);
+    }
+  }
+
+  private async handleReadFileRange(): Promise<void> {
+    const path = this.resolvePath(this.protocol.getPath());
+    const offset = this.protocol.getFlags();
+    const length = this.protocol.getMode();
+    try {
+      const content = await this.fs.readFileBuffer(path);
+      this.protocol.setResult(content.subarray(offset, offset + length));
+      this.protocol.setStatus(Status.SUCCESS);
+    } catch (e) {
+      this.setErrorFromException(e);
+    }
+  }
+
+  private async handleWriteFileRange(): Promise<void> {
+    const path = this.resolvePath(this.protocol.getPath());
+    const offset = this.protocol.getFlags();
+    const data = this.protocol.getData();
+    try {
+      if (offset === 0) {
+        await this.fs.writeFile(path, data);
+      } else {
+        // Sequential appends are positionally exact; reject anything
+        // else rather than corrupt the file silently.
+        const st = await this.fs.stat(path);
+        if (st.size !== offset) {
+          throw new Error(
+            `EIO: non-sequential range write to '${path}': offset ${offset} != size ${st.size}`,
+          );
+        }
+        await this.fs.appendFile(path, data);
+      }
       this.protocol.setStatus(Status.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);

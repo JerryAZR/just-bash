@@ -10,6 +10,7 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
+  Size,
   Status,
 } from "./protocol.js";
 
@@ -84,17 +85,61 @@ export class SyncBackend {
   }
 
   readFile(path: string): Uint8Array {
-    const result = this.execSync(OpCode.READ_FILE, path);
-    if (!result.success) {
-      throw new Error(result.error || "Failed to read file");
+    // Files larger than the transport buffer are read in ranged chunks;
+    // the caller still receives the whole file as one Uint8Array.
+    const size = this.stat(path).size;
+    if (size <= Size.DATA_BUFFER) {
+      const result = this.execSync(OpCode.READ_FILE, path);
+      if (!result.success) {
+        throw new Error(result.error || "Failed to read file");
+      }
+      return result.result ?? new Uint8Array(0);
     }
-    return result.result ?? new Uint8Array(0);
+    const content = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      const length = Math.min(Size.DATA_BUFFER, size - offset);
+      const result = this.execSync(
+        OpCode.READ_FILE_RANGE,
+        path,
+        undefined,
+        offset,
+        length,
+      );
+      if (!result.success) {
+        throw new Error(result.error || "Failed to read file");
+      }
+      const chunk = result.result ?? new Uint8Array(0);
+      content.set(chunk, offset);
+      offset += chunk.length;
+      if (chunk.length === 0) break; // defensive: no progress
+    }
+    return content;
   }
 
   writeFile(path: string, data: Uint8Array): void {
-    const result = this.execSync(OpCode.WRITE_FILE, path, data);
-    if (!result.success) {
-      throw new Error(result.error || "Failed to write file");
+    if (data.length <= Size.DATA_BUFFER) {
+      const result = this.execSync(OpCode.WRITE_FILE, path, data);
+      if (!result.success) {
+        throw new Error(result.error || "Failed to write file");
+      }
+      return;
+    }
+    // Large writes stream as sequential ranges: offset 0 creates/
+    // truncates, subsequent chunks append (positionally exact).
+    let offset = 0;
+    while (offset < data.length) {
+      const chunk = data.subarray(offset, offset + Size.DATA_BUFFER);
+      const result = this.execSync(
+        OpCode.WRITE_FILE_RANGE,
+        path,
+        chunk,
+        offset,
+      );
+      if (!result.success) {
+        throw new Error(result.error || "Failed to write file");
+      }
+      offset += chunk.length;
     }
   }
 

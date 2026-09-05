@@ -37,6 +37,11 @@ export const OpCode = {
   REALPATH: 13,
   RENAME: 14,
   COPY_FILE: 15,
+  // Ranged variants for payloads larger than the data buffer. FLAGS
+  // carries the file offset (uint32); MODE carries the length
+  // (READ_FILE_RANGE only — a write's length is its DATA_LENGTH).
+  READ_FILE_RANGE: 16,
+  WRITE_FILE_RANGE: 17,
   // Special operations for I/O
   WRITE_STDOUT: 100,
   WRITE_STDERR: 101,
@@ -93,7 +98,7 @@ const Offset = {
 } as const;
 
 /** Buffer sizes */
-const Size = {
+export const Size = {
   CONTROL_REGION: 32,
   PATH_BUFFER: 4096,
   // 8MB limit for FS read/write, HTTP responses, and tool invocation results.

@@ -352,28 +352,32 @@ function createHOSTFS(
     return PATH.join(...parts);
   }
 
+  function errnoFromError(e: unknown): number {
+    const msg =
+      (e as Error)?.message?.toLowerCase() ||
+      (typeof e === "string" ? e.toLowerCase() : "");
+    let code = ERRNO_CODES.EIO;
+    if (msg.includes("no such file") || msg.includes("not found")) {
+      code = ERRNO_CODES.ENOENT;
+    } else if (msg.includes("is a directory")) {
+      code = ERRNO_CODES.EISDIR;
+    } else if (msg.includes("not a directory")) {
+      code = ERRNO_CODES.ENOTDIR;
+    } else if (msg.includes("already exists")) {
+      code = ERRNO_CODES.EEXIST;
+    } else if (msg.includes("permission")) {
+      code = ERRNO_CODES.EACCES;
+    } else if (msg.includes("not empty")) {
+      code = ERRNO_CODES.ENOTEMPTY;
+    }
+    return code;
+  }
+
   function tryFSOperation<T>(f: () => T): T {
     try {
       return f();
     } catch (e: unknown) {
-      const msg =
-        (e as Error)?.message?.toLowerCase() ||
-        (typeof e === "string" ? e.toLowerCase() : "");
-      let code = ERRNO_CODES.EIO;
-      if (msg.includes("no such file") || msg.includes("not found")) {
-        code = ERRNO_CODES.ENOENT;
-      } else if (msg.includes("is a directory")) {
-        code = ERRNO_CODES.EISDIR;
-      } else if (msg.includes("not a directory")) {
-        code = ERRNO_CODES.ENOTDIR;
-      } else if (msg.includes("already exists")) {
-        code = ERRNO_CODES.EEXIST;
-      } else if (msg.includes("permission")) {
-        code = ERRNO_CODES.EACCES;
-      } else if (msg.includes("not empty")) {
-        code = ERRNO_CODES.ENOTEMPTY;
-      }
-      throw new FS.ErrnoError(code);
+      throw new FS.ErrnoError(errnoFromError(e));
     }
   }
 
@@ -552,11 +556,16 @@ function createHOSTFS(
           } else {
             content = backend.readFile(path);
           }
-        } catch (_e) {
-          if (isCreate && isWrite) {
+        } catch (e) {
+          // Only a genuine ENOENT means O_CREAT starts an empty file.
+          // Anything else must surface honestly — the previous blanket
+          // ENOENT turned real errors (e.g. bridge failures) into
+          // "No such file or directory" for files that exist.
+          const code = errnoFromError(e);
+          if (code === ERRNO_CODES.ENOENT && isCreate && isWrite) {
             content = new Uint8Array(0);
           } else {
-            throw new FS.ErrnoError(ERRNO_CODES.ENOENT);
+            throw new FS.ErrnoError(code);
           }
         }
 

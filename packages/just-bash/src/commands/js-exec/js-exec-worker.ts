@@ -486,13 +486,57 @@ function setupContext(
   context.setProp(fsObj, "readFileBuffer", readFileBufferFn);
   readFileBufferFn.dispose();
 
+  // Marshal guest write data to bytes. Strings encode as UTF-8;
+  // ArrayBuffer views (Uint8Array, Buffer, DataView) contribute their
+  // raw bytes via the underlying buffer plus the view window. Anything
+  // else falls back to the legacy string coercion. Previously every
+  // value went through getString(), which silently wrote a Uint8Array
+  // as its comma-joined text form ("68,68,68,...") — data corruption.
+  const marshalWriteData = (dataHandle: QuickJSHandle): Uint8Array => {
+    if (context.typeof(dataHandle) === "string") {
+      return new TextEncoder().encode(context.getString(dataHandle));
+    }
+    if (context.typeof(dataHandle) === "object") {
+      const bufferHandle = context.getProp(dataHandle, "buffer");
+      if (bufferHandle && context.typeof(bufferHandle) === "object") {
+        try {
+          const raw = context.getArrayBuffer(bufferHandle).value;
+          const view = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+          const offsetHandle = context.getProp(dataHandle, "byteOffset");
+          const lengthHandle = context.getProp(dataHandle, "byteLength");
+          const offset =
+            offsetHandle && context.typeof(offsetHandle) === "number"
+              ? context.getNumber(offsetHandle)
+              : 0;
+          const length =
+            lengthHandle && context.typeof(lengthHandle) === "number"
+              ? context.getNumber(lengthHandle)
+              : view.byteLength - offset;
+          offsetHandle?.dispose();
+          lengthHandle?.dispose();
+          bufferHandle.dispose();
+          return view.subarray(offset, offset + length);
+        } catch {
+          bufferHandle.dispose();
+        }
+      } else {
+        bufferHandle?.dispose();
+        try {
+          return new Uint8Array(context.getArrayBuffer(dataHandle).value);
+        } catch {
+          // fall through to legacy coercion
+        }
+      }
+    }
+    return new TextEncoder().encode(context.getString(dataHandle));
+  };
+
   const writeFileFn = context.newFunction(
     "writeFile",
     (pathHandle: QuickJSHandle, dataHandle: QuickJSHandle) => {
       const path = context.getString(pathHandle);
-      const data = context.getString(dataHandle);
       try {
-        backend.writeFile(path, new TextEncoder().encode(data));
+        backend.writeFile(path, marshalWriteData(dataHandle));
         return context.undefined;
       } catch (e) {
         return throwError(context, (e as Error).message || "writeFile failed");
@@ -596,9 +640,8 @@ function setupContext(
     "appendFile",
     (pathHandle: QuickJSHandle, dataHandle: QuickJSHandle) => {
       const path = context.getString(pathHandle);
-      const data = context.getString(dataHandle);
       try {
-        backend.appendFile(path, new TextEncoder().encode(data));
+        backend.appendFile(path, marshalWriteData(dataHandle));
         return context.undefined;
       } catch (e) {
         return throwError(context, (e as Error).message || "appendFile failed");
