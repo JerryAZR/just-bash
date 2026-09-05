@@ -39,6 +39,15 @@ export interface OverlayFileNode {
   lowerSize?: number;
   /** Append segments retained without copying the complete file per append. */
   appendChunks?: Uint8Array[];
+  /**
+   * Mutation sequence stamp (tree-local, monotonically increasing).
+   * Set by in-place mutations (appendChunk, chmod, utimes) so sync()
+   * can compare-and-swap: an entry checked against disk is only
+   * detached if it has not been mutated since the check began.
+   * Node replacement (attach/detach) needs no stamp — object identity
+   * already changes. Undefined means never mutated in place.
+   */
+  seq?: number;
   mode: number;
   mtime: Date;
   identity?: string;
@@ -48,6 +57,8 @@ export interface OverlayDirNode {
   type: "directory";
   /** Child nodes keyed by name segment, in insertion order. */
   children: Map<string, OverlayNode>;
+  /** In-place mutation stamp (see OverlayFileNode.seq). */
+  seq?: number;
   mode: number;
   mtime: Date;
   identity?: string;
@@ -56,6 +67,8 @@ export interface OverlayDirNode {
 export interface OverlaySymlinkNode {
   type: "symlink";
   target: string;
+  /** In-place mutation stamp (see OverlayFileNode.seq). */
+  seq?: number;
   mode: number;
   mtime: Date;
 }
@@ -153,6 +166,7 @@ function splitPath(path: string): string[] {
 export class OverlayTree {
   private rootNode: OverlayDirNode = freshDirNode();
   private bytes = 0;
+  private mutationSeq_ = 0;
 
   constructor(private readonly maxMemoryBytes: number) {}
 
@@ -337,6 +351,30 @@ export class OverlayTree {
     if (!node.appendChunks) node.appendChunks = [];
     node.appendChunks.push(chunk);
     this.bytes += chunk.byteLength;
+    this.touch(node);
+  }
+
+  /** Stamp a node as mutated in place (see OverlayFileNode.seq). */
+  touch(node: { seq?: number }): void {
+    node.seq = ++this.mutationSeq_;
+  }
+
+  /**
+   * Compare-and-swap detach: remove the node at `path` only if it is
+   * still the exact same object with the same mutation sequence — i.e.
+   * nothing changed it while the caller's (async) verification ran.
+   * Also refuses to detach a directory that has gained children.
+   * Returns whether the detach happened.
+   */
+  detachIfUnchanged(path: string, node: OverlayNode, seq?: number): boolean {
+    const result = this.descend(path);
+    if (result.kind !== "found" || result.node !== node) return false;
+    // Strict compare, no undefined guard: an unstamped node (undefined)
+    // that receives its first stamp mid-check must NOT match.
+    if ((node as { seq?: number }).seq !== seq) return false;
+    if (node.type === "directory" && node.children.size > 0) return false;
+    this.detach(path);
+    return true;
   }
 
   /**

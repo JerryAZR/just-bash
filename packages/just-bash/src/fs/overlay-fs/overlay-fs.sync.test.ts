@@ -128,6 +128,35 @@ describe("OverlayFs sync() and reset()", () => {
       await overlay.sync();
       expect(overlay.diff()).toEqual({ writes: [], deletions: [] });
     });
+
+    it("keeps entries that were mutated while their disk check ran", async () => {
+      // sync() checks each entry against disk asynchronously, then
+      // detaches matches. A concurrent write landing between check and
+      // detach must survive (compare-and-swap), not be silently dropped.
+      fs.writeFileSync(path.join(tempDir, "f.txt"), "v1");
+      const overlay = new OverlayFs({ root: tempDir, mountPoint: "/" });
+      await overlay.writeFile("/f.txt", "v1"); // upper matches disk
+
+      type DiskCheck = {
+        nodeMatchesDisk: (path: string, node: unknown) => Promise<boolean>;
+      };
+      const hooked = overlay as unknown as DiskCheck;
+      const original = hooked.nodeMatchesDisk.bind(overlay);
+      hooked.nodeMatchesDisk = async (p: string, n: unknown) => {
+        const result = await original(p, n);
+        if (p.endsWith("f.txt")) {
+          // The concurrent writer: lands after the check, before detach.
+          await overlay.appendFile("/f.txt", "-late");
+        }
+        return result;
+      };
+
+      await overlay.sync();
+
+      // The late write is still pending and visible — not dropped.
+      expect(overlay.diff().writes.map((w) => w.path)).toContain("/f.txt");
+      expect(await overlay.readFile("/f.txt")).toBe("v1-late");
+    });
   });
 
   describe("reset()", () => {

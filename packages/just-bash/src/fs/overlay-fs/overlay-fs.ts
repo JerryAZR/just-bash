@@ -65,6 +65,7 @@ import {
   fileNodeBytes,
   type OverlayDirNode,
   type OverlayEntryNode,
+  type OverlayFileNode,
   OverlayTree,
 } from "./overlay-tree.js";
 
@@ -360,8 +361,15 @@ export class OverlayFs implements IFileSystem {
         // Still the container of pending children.
         continue;
       }
+      // Capture the mutation stamp BEFORE the async disk check: the
+      // compare-and-swap below is only meaningful against a pre-check value.
+      const seq = node.seq;
       if (await this.nodeMatchesDisk(path, node)) {
-        this.tree.detach(path);
+        // Compare-and-swap: a concurrent exec may have mutated (or
+        // replaced) this entry while the disk check was in flight —
+        // detaching then would silently drop a write that never
+        // reached disk. Mutated entries stay pending for the next sync.
+        this.tree.detachIfUnchanged(path, node, seq);
       }
     }
   }
@@ -885,22 +893,7 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "found" && result.node.type === "file") {
-      const node = result.node;
-      if (node.metacopy) {
-        // Complete the copy-up: lower data + append chunk, preserving the
-        // metacopy node's mode.
-        const base = await this.readLowerFileBytes(normalized, path, new Set());
-        this.tree.attach(normalized, {
-          type: "file",
-          content: base,
-          appendChunks: [newBuffer],
-          mode: node.mode,
-          mtime: new Date(),
-        });
-        return;
-      }
-      this.tree.appendChunk(node, newBuffer);
-      node.mtime = new Date();
+      await this.appendToExisting_(normalized, result.node, newBuffer, path);
       return;
     }
     if (result.kind === "blocked") {
@@ -927,6 +920,16 @@ export class OverlayFs implements IFileSystem {
       existingBuffer = new Uint8Array(0);
     }
 
+    // Re-descend after the async read: a concurrent exec may have
+    // created an upper node for this path while our read was in flight.
+    // Appending onto it is mandatory — attaching over it would silently
+    // drop the other exec's chunk (POSIX O_APPEND must not lose data).
+    const raced = this.tree.descend(normalized);
+    if (raced.kind === "found" && raced.node.type === "file") {
+      await this.appendToExisting_(normalized, raced.node, newBuffer, path);
+      return;
+    }
+
     this.ensureParentDirs(normalized);
     this.tree.attach(normalized, {
       type: "file",
@@ -935,6 +938,35 @@ export class OverlayFs implements IFileSystem {
       mode: await this.inheritedMode(normalized),
       mtime: new Date(),
     });
+  }
+
+  /** Append to an existing upper file node, completing a metacopy
+   * copy-up first when needed (preserving the node's upper mode). */
+  private async appendToExisting_(
+    normalized: string,
+    node: OverlayFileNode,
+    newBuffer: Uint8Array,
+    originalPath: string,
+  ): Promise<void> {
+    if (node.metacopy) {
+      // Complete the copy-up: lower data + append chunk, preserving the
+      // metacopy node's mode.
+      const base = await this.readLowerFileBytes(
+        normalized,
+        originalPath,
+        new Set(),
+      );
+      this.tree.attach(normalized, {
+        type: "file",
+        content: base,
+        appendChunks: [newBuffer],
+        mode: node.mode,
+        mtime: new Date(),
+      });
+      return;
+    }
+    this.tree.appendChunk(node, newBuffer);
+    node.mtime = new Date();
   }
 
   async exists(path: string): Promise<boolean> {
@@ -1549,6 +1581,7 @@ export class OverlayFs implements IFileSystem {
     const entry = this.entryAt(normalized);
     if (entry) {
       entry.mode = mode;
+      this.tree.touch(entry);
       return;
     }
 
@@ -1883,6 +1916,7 @@ export class OverlayFs implements IFileSystem {
     const entry = this.entryAt(normalized);
     if (entry) {
       entry.mtime = mtime;
+      this.tree.touch(entry);
       return;
     }
 
