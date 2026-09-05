@@ -50,6 +50,8 @@ import {
 import {
   isPathWithinRoot,
   isSameOrDescendantPath,
+  lstatReal,
+  lstatRealSync,
   normalizePath,
   resolveCanonicalPath,
   resolveCanonicalPathNoSymlinks,
@@ -433,7 +435,7 @@ export class OverlayFs implements IFileSystem {
     const canonical = this.resolveRealPathParent_(this.toRealPath(path));
     if (!canonical) return null;
     try {
-      return { canonical, stat: await fs.promises.lstat(canonical) };
+      return { canonical, stat: await lstatReal(canonical) };
     } catch {
       return null;
     }
@@ -479,7 +481,7 @@ export class OverlayFs implements IFileSystem {
     const canonical = this.resolveRealPath_(this.toRealPath(path));
     if (!canonical) return false;
     try {
-      const stat = await fs.promises.lstat(canonical);
+      const stat = await lstatReal(canonical);
       if (!stat.isFile()) return false;
       const upper = coalesceFileContent(node, path);
       // Cheap reject: sizes must match before any content is read.
@@ -666,7 +668,7 @@ export class OverlayFs implements IFileSystem {
     }
 
     try {
-      await fs.promises.lstat(canonical);
+      await lstatReal(canonical);
       return true;
     } catch {
       return false;
@@ -772,7 +774,7 @@ export class OverlayFs implements IFileSystem {
     }
 
     try {
-      const stat = await fs.promises.lstat(canonical);
+      const stat = await lstatReal(canonical);
       if (stat.isSymbolicLink()) {
         if (!this.allowSymlinks) {
           throw new Error(`ENOENT: no such file or directory, open '${path}'`);
@@ -985,7 +987,7 @@ export class OverlayFs implements IFileSystem {
       // Use lstat to avoid following OS-level symlinks directly.
       // If it's a symlink, resolve through the virtual layer to prevent
       // leaking metadata about files outside the sandbox.
-      const lstatResult = await fs.promises.lstat(canonical);
+      const lstatResult = await lstatReal(canonical);
       if (lstatResult.isSymbolicLink()) {
         if (!this.allowSymlinks) {
           throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
@@ -1042,7 +1044,7 @@ export class OverlayFs implements IFileSystem {
     }
 
     try {
-      const stat = await fs.promises.lstat(canonical);
+      const stat = await lstatReal(canonical);
       return {
         isFile: stat.isFile(),
         isDirectory: stat.isDirectory(),
@@ -1209,7 +1211,7 @@ export class OverlayFs implements IFileSystem {
         // lstat detects it.  Node.js has no fd-based readdir, so a tiny
         // TOCTOU window remains between this lstat and the readdir below.
         if (!this.allowSymlinks) {
-          const dirStat = await fs.promises.lstat(canonical);
+          const dirStat = await lstatReal(canonical);
           if (dirStat.isSymbolicLink()) {
             // Treat as non-existent — don't leak real-FS entries. The
             // error must carry the code: the catch below classifies by
@@ -1306,7 +1308,7 @@ export class OverlayFs implements IFileSystem {
     }
 
     try {
-      const stat = await fs.promises.lstat(canonical);
+      const stat = await lstatReal(canonical);
       if (stat.isSymbolicLink()) {
         if (!this.allowSymlinks) {
           return { normalized, outsideOverlay: true };
@@ -1405,7 +1407,7 @@ export class OverlayFs implements IFileSystem {
     const canonical = this.resolveRealPathParent_(realPath);
     if (!canonical) return false;
     try {
-      fs.lstatSync(canonical);
+      lstatRealSync(canonical);
       return true;
     } catch {
       return false;
@@ -1495,7 +1497,7 @@ export class OverlayFs implements IFileSystem {
         const entryPath = nodePath.join(canonical, entry);
         // Use lstatSync to avoid following OS symlinks that could point
         // outside the sandbox root. Symlinks are listed but not traversed.
-        const stat = fs.lstatSync(entryPath);
+        const stat = lstatRealSync(entryPath);
         if (stat.isDirectory()) {
           this.scanRealFs(virtualPath, paths);
         }
@@ -1794,7 +1796,7 @@ export class OverlayFs implements IFileSystem {
           const canonical = this.resolveRealPath_(realPath);
           if (canonical) {
             try {
-              const stat = await fs.promises.lstat(canonical);
+              const stat = await lstatReal(canonical);
               if (stat.isSymbolicLink()) {
                 if (!this.allowSymlinks) {
                   throw new Error(
@@ -1825,7 +1827,7 @@ export class OverlayFs implements IFileSystem {
             const canonicalWithBase = this.resolveRealPathParent_(realPath);
             if (canonicalWithBase) {
               try {
-                const stat = await fs.promises.lstat(canonicalWithBase);
+                const stat = await lstatReal(canonicalWithBase);
                 if (stat.isSymbolicLink()) {
                   throw new Error(
                     `ENOENT: no such file or directory, realpath '${path}'`,

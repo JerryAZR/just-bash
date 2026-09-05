@@ -28,6 +28,7 @@ import {
 } from "../encoding.js";
 import { ExecutionOutputAccumulator } from "../execution-output.js";
 import type { ExecutionScope } from "../execution-scope.js";
+import { isFatalExecutionError } from "../fatal-execution-error.js";
 import type { IFileSystem } from "../fs/interface.js";
 import { mapToRecord } from "../helpers/env.js";
 import type { ExecutionLimits } from "../limits.js";
@@ -284,8 +285,11 @@ export class Interpreter {
             env: mapToRecord(this.ctx.state.env),
           };
         }
-        // ExecutionLimitError must always propagate - these are safety limits
-        if (error instanceof ExecutionLimitError) {
+        // Fatal execution errors (safety limits, abort/timeout, security
+        // violations) must always propagate. Carry the output accumulated
+        // before the abort so callers — e.g. an agent harness on timeout —
+        // can see partial results.
+        if (isFatalExecutionError(error)) {
           output.prependTo(error);
           throw error;
         }

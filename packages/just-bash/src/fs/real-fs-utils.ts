@@ -264,3 +264,30 @@ export function sanitizeFsError(
   const code = err.code || "EIO";
   throw new Error(`${code}: ${operation} '${virtualPath}'`);
 }
+
+/**
+ * lstat a validated real path, normalizing Windows mode fiction: libuv
+ * reports no execute bits on Windows, so directories stat as 0o40666.
+ * Nothing inside the sandbox enforces mode bits, but real POSIX runtimes
+ * behind the fs bridge do — the python worker's Emscripten VFS masks
+ * `mode & 0o777`, making a 0o666 directory untraversable (chdir, listdir,
+ * open all EACCES). Report POSIX-conventional 0o755 for directories,
+ * matching DEFAULT_DIR_MODE so lower and upper dirs present uniformly.
+ * File modes are left as reported (executable-bit fiction for .exe etc.
+ * is a separate question). No-op on other platforms.
+ */
+export async function lstatReal(path: string): Promise<fs.Stats> {
+  return normalizeRealDirMode(await fs.promises.lstat(path));
+}
+
+/** Synchronous counterpart of {@link lstatReal}. */
+export function lstatRealSync(path: string): fs.Stats {
+  return normalizeRealDirMode(fs.lstatSync(path));
+}
+
+function normalizeRealDirMode(stats: fs.Stats): fs.Stats {
+  if (process.platform === "win32" && stats.isDirectory()) {
+    stats.mode = (stats.mode & ~0o777) | 0o755;
+  }
+  return stats;
+}
