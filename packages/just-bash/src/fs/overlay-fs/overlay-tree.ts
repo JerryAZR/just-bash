@@ -48,6 +48,12 @@ export interface OverlayFileNode {
    * already changes. Undefined means never mutated in place.
    */
   seq?: number;
+  /**
+   * Wall-clock time of the last mutation (attach/touch), stamped by the
+   * tree. Distinct from `mtime`: user-visible and utimes-able, whereas
+   * changedAt is the untamperable ordering key mergeDiffs relies on.
+   */
+  changedAt?: number;
   mode: number;
   mtime: Date;
   identity?: string;
@@ -59,6 +65,8 @@ export interface OverlayDirNode {
   children: Map<string, OverlayNode>;
   /** In-place mutation stamp (see OverlayFileNode.seq). */
   seq?: number;
+  /** Wall-clock time of the last mutation (see OverlayFileNode.changedAt). */
+  changedAt?: number;
   mode: number;
   mtime: Date;
   identity?: string;
@@ -69,6 +77,8 @@ export interface OverlaySymlinkNode {
   target: string;
   /** In-place mutation stamp (see OverlayFileNode.seq). */
   seq?: number;
+  /** Wall-clock time of the last mutation (see OverlayFileNode.changedAt). */
+  changedAt?: number;
   mode: number;
   mtime: Date;
 }
@@ -76,6 +86,8 @@ export interface OverlaySymlinkNode {
 /** Leaf marker hiding a lower-layer (real-FS) path and everything under it. */
 export interface OverlayWhiteoutNode {
   type: "whiteout";
+  /** Wall-clock time the whiteout was created (merge ordering). */
+  changedAt?: number;
 }
 
 export type OverlayEntryNode =
@@ -281,6 +293,7 @@ export class OverlayTree {
    *   (write-over / recreate-after-delete)
    */
   attach(path: string, node: OverlayEntryNode): void {
+    node.changedAt = Date.now();
     const segments = splitPath(path);
     if (segments.length === 0) {
       throw new Error(`EINVAL: cannot attach at root, attach '${path}'`);
@@ -340,7 +353,7 @@ export class OverlayTree {
     const current = parent.children.get(name);
     if (current?.type === "whiteout") return;
     this.bytes -= OverlayTree.subtreeBytes(current);
-    parent.children.set(name, { type: "whiteout" });
+    parent.children.set(name, { type: "whiteout", changedAt: Date.now() });
   }
 
   /**
@@ -355,8 +368,9 @@ export class OverlayTree {
   }
 
   /** Stamp a node as mutated in place (see OverlayFileNode.seq). */
-  touch(node: { seq?: number }): void {
+  touch(node: { seq?: number; changedAt?: number }): void {
     node.seq = ++this.mutationSeq_;
+    node.changedAt = Date.now();
   }
 
   /**

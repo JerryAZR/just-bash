@@ -62,7 +62,11 @@ describe("OverlayFs sync() and reset()", () => {
       await overlay.rm("/project/top.txt");
       fs.rmSync(path.join(tempDir, "sub"), { recursive: true });
       await overlay.sync();
-      expect(overlay.diff()).toEqual({ writes: [], deletions: ["/top.txt"] });
+      expect(overlay.diff()).toEqual({
+        writes: [],
+        deletions: ["/top.txt"],
+        deletionChangedAt: [expect.any(Number)],
+      });
     });
 
     it("coalesces append chunks before comparing against disk", async () => {

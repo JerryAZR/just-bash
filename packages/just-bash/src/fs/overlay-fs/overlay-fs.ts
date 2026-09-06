@@ -100,6 +100,13 @@ export interface OverlayWrite {
   /** Modification time; hosts may apply it (utimes) for fidelity. */
   mtime: Date;
   /**
+   * Wall-clock time the overlay recorded this mutation (attach or last
+   * in-place change). Unlike `mtime` this cannot be set from inside the
+   * sandbox, which makes it the trustworthy ordering key for merging
+   * change sets from independent overlays (see mergeDiffs).
+   */
+  changedAt?: number;
+  /**
    * When true, only metadata changed (chmod/utimes via a metacopy shadow):
    * apply `mode` and `mtime` and never touch file content.
    */
@@ -122,6 +129,13 @@ export interface OverlayDiff {
    * never nest, so each entry is a top-most deletion covering its subtree.
    */
   deletions: string[];
+  /**
+   * Wall-clock creation time of each whiteout, aligned with `deletions`
+   * (same order). Overlay-assigned and untamperable — the ordering key
+   * for merging deletions against writes from other overlays. Present
+   * whenever `deletions` is non-empty; absent otherwise.
+   */
+  deletionChangedAt?: number[];
 }
 
 export interface OverlayFsOptions {
@@ -278,12 +292,16 @@ export class OverlayFs implements IFileSystem {
   diff(): OverlayDiff {
     const writes: OverlayWrite[] = [];
     const deletions: string[] = [];
+    const deletionChangedAt: number[] = [];
     for (const { path, node } of this.tree.preOrder()) {
       const relative = this.getRelativeToMount(path);
       if (relative === null || relative === "/") continue;
       if (node.type === "whiteout") {
         // Skip stale markers whose disk path is already gone.
-        if (this.existsOnRealFs(path)) deletions.push(relative);
+        if (this.existsOnRealFs(path)) {
+          deletions.push(relative);
+          deletionChangedAt.push(node.changedAt ?? 0);
+        }
         continue;
       }
       if (node.type === "file") {
@@ -298,6 +316,7 @@ export class OverlayFs implements IFileSystem {
             content: new Uint8Array(0),
             mode: node.mode,
             mtime: node.mtime,
+            changedAt: node.changedAt ?? 0,
             metadataOnly: true,
           });
         } else {
@@ -307,6 +326,7 @@ export class OverlayFs implements IFileSystem {
             content: coalesceFileContent(node, path),
             mode: node.mode,
             mtime: node.mtime,
+            changedAt: node.changedAt ?? 0,
           });
         }
       } else if (node.type === "directory") {
@@ -316,6 +336,7 @@ export class OverlayFs implements IFileSystem {
           content: new Uint8Array(0),
           mode: node.mode,
           mtime: node.mtime,
+          changedAt: node.changedAt ?? 0,
         });
       } else {
         writes.push({
@@ -324,12 +345,27 @@ export class OverlayFs implements IFileSystem {
           content: new TextEncoder().encode(node.target),
           mode: node.mode,
           mtime: node.mtime,
+          changedAt: node.changedAt ?? 0,
         });
       }
     }
     writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    deletions.sort();
-    return { writes, deletions };
+    // Sort deletions together with their stamps to keep the parallel
+    // arrays aligned.
+    const zipped = deletions.map((d, i) => ({
+      path: d,
+      changedAt: deletionChangedAt[i],
+    }));
+    zipped.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return {
+      writes,
+      deletions: zipped.map((z) => z.path),
+      // Present only when there are deletions, so empty-diff consumers
+      // see the shape they have always seen.
+      ...(zipped.length > 0 && {
+        deletionChangedAt: zipped.map((z) => z.changedAt),
+      }),
+    };
   }
 
   /**

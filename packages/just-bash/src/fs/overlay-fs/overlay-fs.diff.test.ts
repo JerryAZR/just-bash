@@ -6,9 +6,9 @@ import { OverlayFs, type OverlayWrite } from "./overlay-fs.js";
 
 const text = (s: string) => new TextEncoder().encode(s);
 
-/** Drop per-write mtime for deterministic comparisons. */
+/** Drop per-write mtime and changedAt for deterministic comparisons. */
 const stripMtime = (ws: OverlayWrite[]) =>
-  ws.map(({ mtime: _, ...rest }) => rest);
+  ws.map(({ mtime: _, changedAt: _c, ...rest }) => rest);
 
 describe("OverlayFs diff()", () => {
   let tempDir: string;
@@ -63,7 +63,11 @@ describe("OverlayFs diff()", () => {
     fs.writeFileSync(path.join(tempDir, "src/b.ts"), "b");
     const overlay = makeOverlay();
     await overlay.rm("/project/src", { recursive: true });
-    expect(overlay.diff()).toEqual({ writes: [], deletions: ["/src"] });
+    expect(overlay.diff()).toEqual({
+      writes: [],
+      deletions: ["/src"],
+      deletionChangedAt: [expect.any(Number)],
+    });
   });
 
   it("reports neither list for create-then-delete that never touched disk", async () => {

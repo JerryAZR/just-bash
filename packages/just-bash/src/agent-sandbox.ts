@@ -45,6 +45,11 @@ export interface SandboxChangeSet {
   writes: SandboxWrite[];
   /** Pending deletions (top-most only), as real absolute paths, sorted. */
   deletions: string[];
+  /**
+   * Wall-clock creation time of each whiteout, aligned with `deletions`
+   * (same order). Optional so hand-built change sets keep working.
+   */
+  deletionChangedAt?: number[];
 }
 
 /**
@@ -143,19 +148,30 @@ export class AgentSandbox {
    */
   diff(): SandboxChangeSet {
     const writes: SandboxWrite[] = [];
-    const deletions: string[] = [];
+    const deletions: { path: string; changedAt?: number }[] = [];
     for (const { root, fs: overlay } of this.overlays.values()) {
       const diff = overlay.diff();
       for (const { path: rel, ...write } of diff.writes) {
         writes.push({ ...write, path: nodePath.join(root, rel) });
       }
-      for (const rel of diff.deletions) {
-        deletions.push(nodePath.join(root, rel));
+      for (let i = 0; i < diff.deletions.length; i++) {
+        deletions.push({
+          path: nodePath.join(root, diff.deletions[i]),
+          changedAt: diff.deletionChangedAt?.[i],
+        });
       }
     }
     writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    deletions.sort();
-    return { writes, deletions };
+    deletions.sort((a, b) =>
+      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    );
+    return {
+      writes,
+      deletions: deletions.map((d) => d.path),
+      ...(deletions.length > 0 && {
+        deletionChangedAt: deletions.map((d) => d.changedAt ?? 0),
+      }),
+    };
   }
 
   /**
