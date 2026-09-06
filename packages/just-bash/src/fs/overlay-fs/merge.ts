@@ -21,6 +21,14 @@ import type { OverlayDiff, OverlayWrite } from "./overlay-fs.js";
  *
  * Conflicts are racy input by definition; this merge owes determinism,
  * not correctness. It never throws on malformed combinations.
+ *
+ * COMPLEXITY: O(n log n) overall. Prefix queries ride on sorted keys:
+ * descendants of a key form a contiguous range right after it, and
+ * ancestor ranges nest properly, so subtree consistency is a stack
+ * sweep (a monotonic max-whiteout stack plus an active-leaf counter)
+ * rather than all-pairs prefix scans. The semantics-matrix suite
+ * (merge.test.ts) is the behavioral contract; this implementation
+ * must agree with it on every cell.
  */
 export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   type Entry = {
@@ -38,17 +46,32 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
     write?: OverlayWrite;
   };
   const keyOf = (p: string) => p.replace(/\\/g, "/");
+  const byKey = (a: Entry, b: Entry) =>
+    a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+  /** a ordered after b? (changedAt, then input order) */
+  const later = (a: Entry, b: Entry) =>
+    a.changedAt !== b.changedAt ? a.changedAt - b.changedAt : a.order - b.order;
 
   const entries: Entry[] = [];
   let order = 0;
   for (const diff of diffs) {
-    const keys = new Set(diff.writes.map((w) => keyOf(w.path)));
-    const hasDescendant = (key: string) => {
+    // Sort this diff's write keys once: with keys sorted, a key has a
+    // descendant in the same diff iff the immediately following key
+    // starts with its prefix — O(W log W) instead of O(W^2) scans.
+    const sortedKeys = diff.writes.map((w) => keyOf(w.path)).sort();
+    const hasDescendant = (key: string): boolean => {
+      // Binary search for the first key >= `${key}/`; that key (if any)
+      // is the candidate descendant. Equivalent to "successor starts
+      // with prefix" because `${key}/` sorts immediately after `key`.
       const prefix = `${key}/`;
-      for (const other of keys) {
-        if (other.startsWith(prefix)) return true;
+      let lo = 0;
+      let hi = sortedKeys.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (sortedKeys[mid] < prefix) lo = mid + 1;
+        else hi = mid;
       }
-      return false;
+      return lo < sortedKeys.length && sortedKeys[lo].startsWith(prefix);
     };
     for (const write of diff.writes) {
       const key = keyOf(write.path);
@@ -76,9 +99,6 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
       });
     }
   }
-
-  const later = (a: Entry, b: Entry) =>
-    a.changedAt !== b.changedAt ? a.changedAt - b.changedAt : a.order - b.order;
 
   // Per-path winner: latest entry — except that a scaffolding dir entry
   // is ignored in any competition where a whiteout participates.
@@ -128,27 +148,72 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
     }
   }
 
-  // Subtree consistency, path-sorted so parents are considered first.
-  const ordered = [...winners.values()].sort((a, b) =>
-    a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
-  );
+  // Subtree consistency as a stack sweep over key-sorted winners.
+  // Ancestor prefix ranges nest properly on sorted distinct keys, so
+  // the active suppressors of the current entry are exactly a stack:
+  //   - any active LEAF suppresses (files cannot have children)
+  //   - otherwise the LATEST active whiteout suppresses everything not
+  //     strictly later than itself (later entries resurrect).
+  // A suppressed entry is never pushed, which is sound: its suppressor
+  // is later and covers its whole subtree range, so every verdict the
+  // suppressed entry would have given is subsumed.
+  const ordered = [...winners.values()].sort(byKey);
+  const isSuppressor = (e: Entry) =>
+    e.kind === "delete" ||
+    (e.kind === "write" &&
+      (e.write?.nodeType === "file" || e.write?.nodeType === "symlink"));
+
+  // Range end (exclusive) of an entry's subtree in `ordered`: first
+  // index whose key does not start with `${key}/`.
+  const rangeEnd = (from: number, key: string): number => {
+    const prefix = `${key}/`;
+    let lo = from + 1;
+    let hi = ordered.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ordered[mid].key.startsWith(prefix)) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  type Active = {
+    end: number; // exclusive subtree-range end in `ordered`
+    leaf: boolean;
+    entry: Entry; // whiteout entry when !leaf
+  };
+  const stack: Active[] = [];
+  let activeLeaves = 0;
   const suppressed = new Set<Entry>();
-  for (const w of ordered) {
-    if (suppressed.has(w)) continue;
-    const prefix = `${w.key}/`;
-    const isWhiteout = w.kind === "delete";
-    const isLeaf =
-      w.kind === "write" &&
-      (w.write?.nodeType === "file" || w.write?.nodeType === "symlink");
-    if (!isWhiteout && !isLeaf) continue;
-    for (const other of ordered) {
-      if (other === w || suppressed.has(other)) continue;
-      if (!other.key.startsWith(prefix)) continue;
-      // A whiteout suppresses only strictly-earlier subtree entries —
-      // later ones resurrect the path. A file/symlink suppresses every
-      // descendant: files cannot have children.
-      if (isWhiteout && later(other, w) > 0) continue;
-      suppressed.add(other);
+
+  for (let i = 0; i < ordered.length; i++) {
+    const e = ordered[i];
+    while (stack.length > 0 && stack[stack.length - 1].end <= i) {
+      if (stack.pop()?.leaf) activeLeaves--;
+    }
+    if (activeLeaves > 0) {
+      suppressed.add(e);
+      continue;
+    }
+    // Latest active whiteout = deepest whiteout on the stack is NOT
+    // necessarily the latest by (changedAt, order); find the max among
+    // active whiteouts. The stack is shallow (path depth), and the
+    // verdict needs only the maximum — scan it.
+    let maxWhiteout: Entry | undefined;
+    for (const a of stack) {
+      if (a.leaf) continue;
+      if (!maxWhiteout || later(a.entry, maxWhiteout) > 0) {
+        maxWhiteout = a.entry;
+      }
+    }
+    if (maxWhiteout && later(e, maxWhiteout) <= 0) {
+      suppressed.add(e);
+      continue;
+    }
+    if (isSuppressor(e)) {
+      const leaf = e.kind !== "delete";
+      stack.push({ end: rangeEnd(i, e.key), leaf, entry: e });
+      if (leaf) activeLeaves++;
     }
   }
 
@@ -169,10 +234,20 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   }
   // A deletion strictly under another surviving deletion is redundant
   // (applying the ancestor covers it) — drop it regardless of time.
-  const kept = survivingDeletions.filter(
-    (d) =>
-      !survivingDeletions.some((a) => a !== d && d.key.startsWith(`${a.key}/`)),
-  );
+  // Sorted by key, deletion ranges nest: an open-range stack decides.
+  const kept: { path: string; key: string; changedAt: number }[] = [];
+  const openRanges: string[] = []; // prefixes of enclosing deletions
+  for (const d of survivingDeletions) {
+    while (
+      openRanges.length > 0 &&
+      !d.key.startsWith(openRanges[openRanges.length - 1])
+    ) {
+      openRanges.pop();
+    }
+    if (openRanges.length > 0) continue; // covered by an ancestor deletion
+    kept.push(d);
+    openRanges.push(`${d.key}/`);
+  }
   writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return {
     writes,
