@@ -162,9 +162,7 @@ export class AgentSandbox {
       }
     }
     writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    deletions.sort((a, b) =>
-      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-    );
+    deletions.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     return {
       writes,
       deletions: deletions.map((d) => d.path),

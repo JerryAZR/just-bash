@@ -67,9 +67,7 @@ describe("diff() changedAt stamps", () => {
     expect(metacopy.mtime).toEqual(ancient);
     // ...but changedAt advanced: a merge orders this entry AFTER the
     // original write, which is what actually happened.
-    expect(metacopy.changedAt ?? 0).toBeGreaterThan(
-      firstWrite.changedAt ?? 0,
-    );
+    expect(metacopy.changedAt ?? 0).toBeGreaterThan(firstWrite.changedAt ?? 0);
     // An utimes on an upper-layer file updates it in place (metacopy
     // shadows are only for lower files), so this stays a full write.
     expect(metacopy.content.length).toBeGreaterThan(0);
