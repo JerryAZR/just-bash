@@ -10,8 +10,9 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
+  RequestState,
+  ResultState,
   Size,
-  Status,
 } from "./protocol.js";
 
 /**
@@ -47,34 +48,21 @@ export class SyncBackend {
       this.protocol.setData(data);
     }
 
-    this.protocol.setStatus(Status.READY);
-    this.protocol.notify();
+    this.protocol.setRequest(RequestState.REQUEST);
+    this.protocol.notifyRequest();
 
-    // Wait for main thread to process (with timeout). READY-after-wake is
-    // a spurious notify, not a result: bridgeHandler.stop() writes READY
-    // and notifies to wake the HOST loop during cancel/abort, and
-    // Atomics.notify wakes the worker's wait even though the value did
-    // not change. Re-wait for the real result; a genuine cancel still
-    // wins via worker termination or the operation timeout backstop.
-    const deadline = Date.now() + this.operationTimeoutMs;
-    let waitResult = this.protocol.waitForResult(this.operationTimeoutMs);
-    while (
-      waitResult !== "timed-out" &&
-      this.protocol.getStatus() === Status.READY
-    ) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        waitResult = "timed-out";
-        break;
-      }
-      waitResult = this.protocol.waitForResult(remaining);
-    }
+    // Wait on the RESULT word (host-only). With the two-word protocol,
+    // stop() never touches this word, so a wake here is always a real
+    // result publish — the torn-read class is unrepresentable. A state
+    // outside the ResultState table is a genuine protocol bug and fails
+    // loudly below.
+    const waitResult = this.protocol.waitForResult(this.operationTimeoutMs);
     if (waitResult === "timed-out") {
       return { success: false, error: "Operation timed out" };
     }
 
-    const status = this.protocol.getStatus();
-    if (status === Status.SUCCESS) {
+    const resultState = this.protocol.getResultState();
+    if (resultState === ResultState.SUCCESS) {
       const totalLength = this.protocol.getResultLength();
       if (totalLength <= Size.DATA_BUFFER) {
         return { success: true, result: this.protocol.getResult() };
@@ -110,15 +98,26 @@ export class SyncBackend {
       }
       return { success: true, result: content };
     }
+    if (resultState === ResultState.ERROR) {
+      return {
+        success: false,
+        error:
+          this.protocol.getResultAsString() ||
+          // Impossible by construction: every host error path publishes a
+          // code and message. If this ever fires, the diagnostic payload
+          // must identify the exact protocol state.
+          `bridge protocol violation: op ${opCode} ERROR with empty message ` +
+            `(wait=${waitResult}, errorCode=${this.protocol.getErrorCode()})`,
+        errorCode: this.protocol.getErrorCode(),
+      };
+    }
+    // Neither SUCCESS nor ERROR: impossible under the two-word protocol
+    // (the result wait only wakes on a result publish). Fail loudly.
     return {
       success: false,
       error:
-        this.protocol.getResultAsString() ||
-        // Impossible by construction: every host error path publishes a
-        // code and message. If this ever fires, the diagnostic payload
-        // must identify the exact protocol state.
-        `bridge protocol violation: op ${opCode} woke with status ${status} ` +
-          `(wait=${waitResult}, errorCode=${this.protocol.getErrorCode()})`,
+        `bridge protocol violation: op ${opCode} woke with resultState ` +
+        `${resultState} (wait=${waitResult}, errorCode=${this.protocol.getErrorCode()})`,
       errorCode: this.protocol.getErrorCode(),
     };
   }

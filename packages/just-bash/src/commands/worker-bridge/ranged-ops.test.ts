@@ -7,7 +7,8 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
-  Status,
+  RequestState,
+  ResultState,
 } from "./protocol.js";
 
 async function sendOp(
@@ -28,12 +29,12 @@ async function sendOp(
   if (opts?.data !== undefined) {
     protocol.setData(opts.data);
   }
-  protocol.setStatus(Status.READY);
-  protocol.notify();
+  protocol.setRequest(RequestState.REQUEST);
+  protocol.notifyRequest();
 
   for (let i = 0; i < 1000; i++) {
-    const status = protocol.getStatus();
-    if (status === Status.SUCCESS || status === Status.ERROR) {
+    const status = protocol.getResultState();
+    if (status === ResultState.SUCCESS || status === ResultState.ERROR) {
       return { status, result: protocol.getResult() };
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -60,18 +61,18 @@ describe("ranged bridge ops", () => {
         data: chunkA,
         flags: 0,
       });
-      expect(w0.status).toBe(Status.SUCCESS);
+      expect(w0.status).toBe(ResultState.SUCCESS);
       const w1 = await sendOp(protocol, OpCode.WRITE_FILE_RANGE, {
         path: "/big.bin",
         data: chunkB,
         flags: 100,
       });
-      expect(w1.status).toBe(Status.SUCCESS);
+      expect(w1.status).toBe(ResultState.SUCCESS);
 
       const full = await sendOp(protocol, OpCode.READ_FILE, {
         path: "/big.bin",
       });
-      expect(full.status).toBe(Status.SUCCESS);
+      expect(full.status).toBe(ResultState.SUCCESS);
       expect(full.result.length).toBe(150);
       expect(full.result[0]).toBe(65);
       expect(full.result[149]).toBe(66);
@@ -109,7 +110,7 @@ describe("ranged bridge ops", () => {
         data: new Uint8Array(10).fill(66),
         flags: 999, // way past current size
       });
-      expect(bad.status).toBe(Status.ERROR);
+      expect(bad.status).toBe(ResultState.ERROR);
       expect(new TextDecoder().decode(bad.result)).toContain(
         "non-sequential range write",
       );
@@ -141,7 +142,7 @@ describe("ranged bridge ops", () => {
       const res = await sendOp(protocol, OpCode.READ_FILE, {
         path: "/secret.txt",
       });
-      expect(res.status).toBe(Status.ERROR);
+      expect(res.status).toBe(ResultState.ERROR);
       expect(protocol.getErrorCode()).toBe(ErrorCode.PERMISSION_DENIED);
     } finally {
       handler.stop();

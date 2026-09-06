@@ -23,7 +23,8 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
-  Status,
+  RequestState,
+  ResultState,
 } from "./protocol.js";
 
 export interface BridgeOutput {
@@ -121,22 +122,32 @@ export class BridgeHandler {
         break;
       }
 
-      // Wait for worker to set status to READY
+      // Wait for worker to publish a request
       const remainingMs = this.remainingMs();
       const ready = await this.protocol.waitUntilReady(remainingMs);
       if (!ready) {
+        // CANCELLED wakes land here too: stop() already flipped running,
+        // so a non-ready wake while stopped is a cancel, not a timeout.
+        if (!this.running) break;
         this.output.stderr += `\n${this.commandName}: execution timeout exceeded\n`;
         this.output.exitCode = 124;
         break;
       }
       if (!this.running) break;
 
+      // Consume the request: return the word to IDLE BEFORE handling, so
+      // the next loop iteration cannot re-read this request as new. This
+      // is the consumption half of the two-word handshake — without it
+      // the host would hot-loop on a stale REQUEST (the worker only
+      // resets the word at the START of its next op).
+      this.protocol.setRequest(RequestState.IDLE);
+
       const opCode = this.protocol.getOpCode();
       await this.handleOperation(opCode);
 
-      // handleOperation sets status to SUCCESS/ERROR
-      // Notify worker so it wakes up and sees the result
-      this.protocol.notify();
+      // handleOperation publishes SUCCESS/ERROR on the result word.
+      // Notify the worker's result wait.
+      this.protocol.notifyResult();
     }
 
     return this.output;
@@ -146,8 +157,10 @@ export class BridgeHandler {
     this.running = false;
     this.lastResult = null;
     // Wake a handler blocked before the worker's first bridge operation.
-    this.protocol.setStatus(Status.READY);
-    this.protocol.notify();
+    // CANCELLED goes on the REQUEST word — it is not a result and can
+    // never be torn into a worker's result wait.
+    this.protocol.setRequest(RequestState.CANCELLED);
+    this.protocol.notifyRequest();
   }
 
   private async handleOperation(opCode: OpCodeType): Promise<void> {
@@ -224,7 +237,7 @@ export class BridgeHandler {
           break;
         default:
           this.protocol.setErrorCode(ErrorCode.IO_ERROR);
-          this.protocol.setStatus(Status.ERROR);
+          this.protocol.setResultState(ResultState.ERROR);
       }
     } catch (e) {
       this.setErrorFromException(e);
@@ -238,7 +251,7 @@ export class BridgeHandler {
       typeof data === "string" ? new TextEncoder().encode(data) : data;
     this.lastResult = bytes;
     this.protocol.setResultPrefix(bytes);
-    this.protocol.setStatus(Status.SUCCESS);
+    this.protocol.setResultState(ResultState.SUCCESS);
   }
 
   private handleReadResultRange(): void {
@@ -248,13 +261,13 @@ export class BridgeHandler {
     if (!retained || offset > retained.length) {
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString("No retained result for range read");
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
     // Serve via setResult (fits the buffer), NOT publishResult — a
     // range read must not replace the buffer it is reading from.
     this.protocol.setResult(retained.subarray(offset, offset + length));
-    this.protocol.setStatus(Status.SUCCESS);
+    this.protocol.setResultState(ResultState.SUCCESS);
   }
 
   private resolvePath(path: string): string {
@@ -289,7 +302,7 @@ export class BridgeHandler {
         }
         await this.fs.appendFile(path, data);
       }
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -300,7 +313,7 @@ export class BridgeHandler {
     const data = this.protocol.getData();
     try {
       await this.fs.writeFile(path, data);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -311,7 +324,7 @@ export class BridgeHandler {
     try {
       const stat = await this.fs.stat(path);
       this.protocol.encodeStat(stat);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -322,7 +335,7 @@ export class BridgeHandler {
     try {
       const stat = await this.fs.lstat(path);
       this.protocol.encodeStat(stat);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -344,7 +357,7 @@ export class BridgeHandler {
     const recursive = (flags & Flags.MKDIR_RECURSIVE) !== 0;
     try {
       await this.fs.mkdir(path, { recursive });
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -357,7 +370,7 @@ export class BridgeHandler {
     const force = (flags & Flags.FORCE) !== 0;
     try {
       await this.fs.rm(path, { recursive, force });
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -368,7 +381,7 @@ export class BridgeHandler {
     try {
       const exists = await this.fs.exists(path);
       this.protocol.setResult(new Uint8Array([exists ? 1 : 0]));
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -379,7 +392,7 @@ export class BridgeHandler {
     const data = this.protocol.getData();
     try {
       await this.fs.appendFile(path, data);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -391,7 +404,7 @@ export class BridgeHandler {
     const linkPath = this.resolvePath(path);
     try {
       await this.fs.symlink(data, linkPath);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -402,7 +415,7 @@ export class BridgeHandler {
     try {
       const target = await this.fs.readlink(path);
       this.protocol.setResultFromString(target);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -413,7 +426,7 @@ export class BridgeHandler {
     const mode = this.protocol.getMode();
     try {
       await this.fs.chmod(path, mode);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -424,7 +437,7 @@ export class BridgeHandler {
     try {
       const realpath = await this.fs.realpath(path);
       this.protocol.setResultFromString(realpath);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -435,7 +448,7 @@ export class BridgeHandler {
     const newPath = this.resolvePath(this.protocol.getDataAsString());
     try {
       await this.fs.mv(oldPath, newPath);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -446,7 +459,7 @@ export class BridgeHandler {
     const dest = this.resolvePath(this.protocol.getDataAsString());
     try {
       await this.fs.cp(src, dest);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.protocol.setResultState(ResultState.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -460,10 +473,10 @@ export class BridgeHandler {
       this.appendOutputLimitError();
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString("Output size limit exceeded");
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
-    this.protocol.setStatus(Status.SUCCESS);
+    this.protocol.setResultState(ResultState.SUCCESS);
   }
 
   private handleWriteStderr(): void {
@@ -474,10 +487,10 @@ export class BridgeHandler {
       this.appendOutputLimitError();
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString("Output size limit exceeded");
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
-    this.protocol.setStatus(Status.SUCCESS);
+    this.protocol.setResultState(ResultState.SUCCESS);
   }
 
   private handleExit(): void {
@@ -487,7 +500,7 @@ export class BridgeHandler {
     } else if (this.output.exitCode === 0) {
       this.output.exitCode = 1;
     }
-    this.protocol.setStatus(Status.SUCCESS);
+    this.protocol.setResultState(ResultState.SUCCESS);
     this.running = false;
   }
 
@@ -563,7 +576,7 @@ export class BridgeHandler {
       this.protocol.setResultFromString(
         "Network access not configured. Enable network in Bash options.",
       );
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
 
@@ -601,7 +614,7 @@ export class BridgeHandler {
       );
       this.protocol.setErrorCode(ErrorCode.NETWORK_ERROR);
       this.protocol.setResultFromString(message);
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
     }
   }
 
@@ -612,7 +625,7 @@ export class BridgeHandler {
       this.protocol.setResultFromString(
         "Command execution not available in this context.",
       );
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
 
@@ -653,7 +666,7 @@ export class BridgeHandler {
       const message = e instanceof Error ? e.message : String(e);
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString(message);
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
     }
   }
 
@@ -664,7 +677,7 @@ export class BridgeHandler {
       this.protocol.setResultFromString(
         "Tool invocation not available in this context.",
       );
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
       return;
     }
 
@@ -682,7 +695,7 @@ export class BridgeHandler {
       );
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString(message);
-      this.protocol.setStatus(Status.ERROR);
+      this.protocol.setResultState(ResultState.ERROR);
     }
   }
 
@@ -728,6 +741,6 @@ export class BridgeHandler {
 
     this.protocol.setErrorCode(errorCode);
     this.protocol.setResultFromString(message);
-    this.protocol.setStatus(Status.ERROR);
+    this.protocol.setResultState(ResultState.ERROR);
   }
 }

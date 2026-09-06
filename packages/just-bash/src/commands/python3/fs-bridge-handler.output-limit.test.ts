@@ -6,7 +6,8 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
-  Status,
+  RequestState,
+  ResultState,
 } from "../worker-bridge/protocol.js";
 
 async function sendOp(
@@ -21,12 +22,12 @@ async function sendOp(
   if (opts?.data !== undefined) {
     protocol.setDataFromString(opts.data);
   }
-  protocol.setStatus(Status.READY);
-  protocol.notify();
+  protocol.setRequest(RequestState.REQUEST);
+  protocol.notifyRequest();
 
   for (let i = 0; i < 200; i++) {
-    const status = protocol.getStatus();
-    if (status === Status.SUCCESS || status === Status.ERROR) {
+    const status = protocol.getResultState();
+    if (status === ResultState.SUCCESS || status === ResultState.ERROR) {
       return status;
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -74,15 +75,15 @@ describe("BridgeHandler output limits", () => {
     const s1 = await sendOp(protocol, OpCode.WRITE_STDOUT, {
       data: "X".repeat(100),
     });
-    expect(s1).toBe(Status.SUCCESS);
+    expect(s1).toBe(ResultState.SUCCESS);
     const s2 = await sendOp(protocol, OpCode.WRITE_STDOUT, {
       data: "Y".repeat(50),
     });
-    expect(s2).toBe(Status.ERROR);
+    expect(s2).toBe(ResultState.ERROR);
     const s3 = await sendOp(protocol, OpCode.WRITE_STDERR, {
       data: "Z".repeat(20),
     });
-    expect(s3).toBe(Status.ERROR);
+    expect(s3).toBe(ResultState.ERROR);
     await sendOp(protocol, OpCode.EXIT, { flags: 0 });
 
     const result = await runPromise;

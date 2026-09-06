@@ -8,7 +8,8 @@ import {
   OpCode,
   type OpCodeType,
   ProtocolBuffer,
-  Status,
+  RequestState,
+  ResultState,
 } from "./protocol.js";
 
 async function sendOp(
@@ -23,12 +24,12 @@ async function sendOp(
   if (opts?.data !== undefined) {
     protocol.setDataFromString(opts.data);
   }
-  protocol.setStatus(Status.READY);
-  protocol.notify();
+  protocol.setRequest(RequestState.REQUEST);
+  protocol.notifyRequest();
 
   for (let i = 0; i < 1000; i++) {
-    const status = protocol.getStatus();
-    if (status === Status.SUCCESS || status === Status.ERROR) {
+    const status = protocol.getResultState();
+    if (status === ResultState.SUCCESS || status === ResultState.ERROR) {
       return status;
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -55,7 +56,7 @@ describe("BridgeHandler raceDeadline", () => {
       data: JSON.stringify({ method: "GET" }),
     });
 
-    expect(status).toBe(Status.ERROR);
+    expect(status).toBe(ResultState.ERROR);
     const errMsg = protocol.getResultAsString();
     expect(errMsg).toContain("timed out");
 
@@ -85,7 +86,7 @@ describe("BridgeHandler raceDeadline", () => {
       path: "echo hello",
     });
 
-    expect(status).toBe(Status.ERROR);
+    expect(status).toBe(ResultState.ERROR);
     const errMsg = protocol.getResultAsString();
     expect(errMsg).toContain("timed out");
 
@@ -115,7 +116,7 @@ describe("BridgeHandler raceDeadline", () => {
       data: "{}",
     });
 
-    expect(status).toBe(Status.ERROR);
+    expect(status).toBe(ResultState.ERROR);
     const errMsg = protocol.getResultAsString();
     expect(errMsg).toContain("timed out");
 
@@ -147,7 +148,7 @@ describe("BridgeHandler raceDeadline", () => {
       data: "{}",
     });
 
-    expect(status).toBe(Status.ERROR);
+    expect(status).toBe(ResultState.ERROR);
     const errMsg = protocol.getResultAsString();
     expect(errMsg).toContain("<path>");
     expect(errMsg).not.toContain("/Users/alice");

@@ -61,15 +61,36 @@ export const OpCode = {
 
 export type OpCodeType = (typeof OpCode)[keyof typeof OpCode];
 
-/** Status codes for synchronization */
-export const Status = {
-  PENDING: 0,
-  READY: 1,
-  SUCCESS: 2,
-  ERROR: 3,
-} as const;
+/**
+ * Two-word request/result state. The previous single STATUS word was
+ * written by THREE actors with TWO meanings (worker READY = "request
+ * published", host SUCCESS/ERROR = "result published", stop() READY =
+ * "wake for cancel") — a worker waiting for a result could observe a
+ * request-channel value and read a torn buffer (the CI flake class).
+ * Splitting the channels makes the torn state unrepresentable: a
+ * result wait is only ever woken by a result write. A state outside
+ * the tables on wake is a genuine protocol bug and fails loudly.
+ */
 
-export type StatusType = (typeof Status)[keyof typeof Status];
+/** Worker + stop() write; the host waits on this word. */
+export const RequestState = {
+  IDLE: 0,
+  /** Worker has published an op. */
+  REQUEST: 1,
+  /** stop() cancellation wake. The host treats any non-REQUEST wake as
+   * loop-abort (stop() also flips its `running` flag). */
+  CANCELLED: 2,
+} as const;
+export type RequestStateType = (typeof RequestState)[keyof typeof RequestState];
+
+/** Host writes; the worker waits on this word. stop() never touches
+ * it, so a result wait cannot be torn by cancellation. */
+export const ResultState = {
+  NONE: 0,
+  SUCCESS: 1,
+  ERROR: 2,
+} as const;
+export type ResultStateType = (typeof ResultState)[keyof typeof ResultState];
 
 /** Error codes */
 export const ErrorCode = {
@@ -92,27 +113,28 @@ export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
 /** Buffer layout offsets */
 const Offset = {
   OP_CODE: 0,
-  STATUS: 4,
+  REQUEST: 4,
   PATH_LENGTH: 8,
   DATA_LENGTH: 12,
   RESULT_LENGTH: 16,
   ERROR_CODE: 20,
   FLAGS: 24,
   MODE: 28,
-  PATH_BUFFER: 32,
-  DATA_BUFFER: 4128, // 32 + 4096
+  RESULT_STATE: 32,
+  PATH_BUFFER: 36,
+  DATA_BUFFER: 4132, // 36 + 4096
 } as const;
 
 /** Buffer sizes */
 export const Size = {
-  CONTROL_REGION: 32,
+  CONTROL_REGION: 36,
   PATH_BUFFER: 4096,
   // 8MB transfer CHUNK size — not a semantic cap. Results larger than
   // this are assembled transparently (READ_RESULT_RANGE), and large
   // writes stream as WRITE_FILE_RANGE chunks. Sized to keep ordinary
   // ops single-transfer while bounding per-transfer copies.
   DATA_BUFFER: 8388608,
-  TOTAL: 8392736, // 32 + 4096 + 8MB
+  TOTAL: 8392740, // 36 + 4096 + 8MB
 } as const;
 
 /** Flags for operations */
@@ -165,12 +187,26 @@ export class ProtocolBuffer {
     _Atomics.store(this.int32View, Offset.OP_CODE / 4, code);
   }
 
-  getStatus(): StatusType {
-    return _Atomics.load(this.int32View, Offset.STATUS / 4) as StatusType;
+  getRequest(): RequestStateType {
+    return _Atomics.load(
+      this.int32View,
+      Offset.REQUEST / 4,
+    ) as RequestStateType;
   }
 
-  setStatus(status: StatusType): void {
-    _Atomics.store(this.int32View, Offset.STATUS / 4, status);
+  setRequest(request: RequestStateType): void {
+    _Atomics.store(this.int32View, Offset.REQUEST / 4, request);
+  }
+
+  getResultState(): ResultStateType {
+    return _Atomics.load(
+      this.int32View,
+      Offset.RESULT_STATE / 4,
+    ) as ResultStateType;
+  }
+
+  setResultState(state: ResultStateType): void {
+    _Atomics.store(this.int32View, Offset.RESULT_STATE / 4, state);
   }
 
   getPathLength(): number {
@@ -369,8 +405,8 @@ export class ProtocolBuffer {
   waitForReady(timeout?: number): "ok" | "timed-out" | "not-equal" {
     return _Atomics.wait(
       this.int32View,
-      Offset.STATUS / 4,
-      Status.PENDING,
+      Offset.REQUEST / 4,
+      RequestState.IDLE,
       timeout,
     );
   }
@@ -380,26 +416,32 @@ export class ProtocolBuffer {
   ):
     | { async: false; value: "not-equal" | "timed-out" }
     | { async: true; value: Promise<"ok" | "timed-out"> } {
-    // Wait for status to change from PENDING (any change means worker set READY)
+    // Wait for the request word to change from IDLE (any change means
+    // the worker published a request — or stop() cancelled).
     return _Atomics.waitAsync(
       this.int32View,
-      Offset.STATUS / 4,
-      Status.PENDING,
+      Offset.REQUEST / 4,
+      RequestState.IDLE,
       timeout,
     );
   }
 
   /**
-   * Wait for status to become READY.
-   * Returns immediately if status is already READY, or waits until it changes.
+   * Wait for the request word to become REQUEST.
+   * Returns immediately if already REQUEST; CANCELLED or any unexpected
+   * state returns false (the caller's running-flag check aborts the loop).
    */
   async waitUntilReady(timeout: number): Promise<boolean> {
     const startTime = Date.now();
 
     while (true) {
-      const status = this.getStatus();
-      if (status === Status.READY) {
+      const request = this.getRequest();
+      if (request === RequestState.REQUEST) {
         return true;
+      }
+      // IDLE is the only waitable state.
+      if (request !== RequestState.IDLE) {
+        return false;
       }
 
       const elapsed = Date.now() - startTime;
@@ -407,12 +449,11 @@ export class ProtocolBuffer {
         return false;
       }
 
-      // Wait for any status change
       const remainingMs = timeout - elapsed;
       const result = _Atomics.waitAsync(
         this.int32View,
-        Offset.STATUS / 4,
-        status,
+        Offset.REQUEST / 4,
+        RequestState.IDLE,
         remainingMs,
       );
 
@@ -422,26 +463,32 @@ export class ProtocolBuffer {
           return false;
         }
       }
-      // Re-check status after wait
+      // Re-check request after wait
     }
   }
 
+  /** Worker-side blocking wait on the RESULT word (host writes). */
   waitForResult(timeout?: number): "ok" | "timed-out" | "not-equal" {
     return _Atomics.wait(
       this.int32View,
-      Offset.STATUS / 4,
-      Status.READY,
+      Offset.RESULT_STATE / 4,
+      ResultState.NONE,
       timeout,
     );
   }
 
-  notify(): number {
-    return _Atomics.notify(this.int32View, Offset.STATUS / 4);
+  notifyRequest(): number {
+    return _Atomics.notify(this.int32View, Offset.REQUEST / 4);
+  }
+
+  notifyResult(): number {
+    return _Atomics.notify(this.int32View, Offset.RESULT_STATE / 4);
   }
 
   reset(): void {
     this.setOpCode(OpCode.NOOP);
-    this.setStatus(Status.PENDING);
+    this.setRequest(RequestState.IDLE);
+    this.setResultState(ResultState.NONE);
     this.setPathLength(0);
     this.setDataLength(0);
     this.setResultLength(0);
