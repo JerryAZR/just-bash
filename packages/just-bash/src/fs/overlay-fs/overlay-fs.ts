@@ -743,8 +743,9 @@ export class OverlayFs implements IFileSystem {
 
     // Detect symlink loops
     if (seen.has(normalized)) {
-      throw new Error(
-        `ELOOP: too many levels of symbolic links, open '${path}'`,
+      throw new FsError(
+        "ELOOP",
+        `too many levels of symbolic links, open '${path}'`,
       );
     }
     seen.add(normalized);
@@ -769,8 +770,9 @@ export class OverlayFs implements IFileSystem {
         return this.readFileBuffer(target, seen);
       }
       if (memEntry.type !== "file") {
-        throw new Error(
-          `EISDIR: illegal operation on a directory, read '${path}'`,
+        throw new FsError(
+          "EISDIR",
+          `illegal operation on a directory, read '${path}'`,
         );
       }
       if (!memEntry.metacopy) {
@@ -836,13 +838,15 @@ export class OverlayFs implements IFileSystem {
         return this.readFileBuffer(resolvedTarget, seen);
       }
       if (stat.isDirectory()) {
-        throw new Error(
-          `EISDIR: illegal operation on a directory, read '${path}'`,
+        throw new FsError(
+          "EISDIR",
+          `illegal operation on a directory, read '${path}'`,
         );
       }
       if (this.maxFileReadSize > 0 && stat.size > this.maxFileReadSize) {
-        throw new Error(
-          `EFBIG: file too large, read '${path}' (${stat.size} bytes, max ${this.maxFileReadSize})`,
+        throw new FsError(
+          "EFBIG",
+          `file too large, read '${path}' (${stat.size} bytes, max ${this.maxFileReadSize})`,
         );
       }
       // Use O_NOFOLLOW (when symlinks disabled) to prevent TOCTOU: if the
@@ -1050,8 +1054,9 @@ export class OverlayFs implements IFileSystem {
 
     // Detect symlink loops
     if (seen.has(normalized)) {
-      throw new Error(
-        `ELOOP: too many levels of symbolic links, stat '${path}'`,
+      throw new FsError(
+        "ELOOP",
+        `too many levels of symbolic links, stat '${path}'`,
       );
     }
     seen.add(normalized);
@@ -1341,8 +1346,9 @@ export class OverlayFs implements IFileSystem {
             // error must carry the code: the catch below classifies by
             // .code, and a plain Error would be mislabeled as EIO.
             if (!dirNode) {
-              const err = new Error(
-                `ENOENT: no such file or directory, scandir '${path}'`,
+              const err = new FsError(
+                "ENOENT",
+                `no such file or directory, scandir '${path}'`,
               ) as NodeJS.ErrnoException;
               err.code = "ENOENT";
               throw err;
@@ -1370,8 +1376,9 @@ export class OverlayFs implements IFileSystem {
         // If it's ENOENT and we don't have it in memory, throw
         if ((e as NodeJS.ErrnoException).code === "ENOENT") {
           if (!dirNode) {
-            throw new Error(
-              `ENOENT: no such file or directory, scandir '${path}'`,
+            throw new FsError(
+              "ENOENT",
+              `no such file or directory, scandir '${path}'`,
             );
           }
         } else if ((e as NodeJS.ErrnoException).code !== "ENOTDIR") {
@@ -1407,8 +1414,9 @@ export class OverlayFs implements IFileSystem {
         return { normalized, outsideOverlay: false };
       }
       if (seen.has(normalized)) {
-        throw new Error(
-          `ELOOP: too many levels of symbolic links, scandir '${path}'`,
+        throw new FsError(
+          "ELOOP",
+          `too many levels of symbolic links, scandir '${path}'`,
         );
       }
       seen.add(normalized);
@@ -1759,8 +1767,9 @@ export class OverlayFs implements IFileSystem {
 
     const existingExists = await this.existsInOverlay(existingNorm);
     if (!existingExists) {
-      throw new Error(
-        `ENOENT: no such file or directory, link '${existingPath}'`,
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, link '${existingPath}'`,
       );
     }
 
@@ -1806,8 +1815,9 @@ export class OverlayFs implements IFileSystem {
     if (result.kind === "found") {
       const entry = result.node;
       if (entry.type === "whiteout") {
-        throw new Error(
-          `ENOENT: no such file or directory, readlink '${path}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, readlink '${path}'`,
         );
       }
       if (entry.type !== "symlink") {
@@ -1854,8 +1864,9 @@ export class OverlayFs implements IFileSystem {
       return this.realTargetToVirtual(rawTarget);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `ENOENT: no such file or directory, readlink '${path}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, readlink '${path}'`,
         );
       }
       if ((e as NodeJS.ErrnoException).code === "EINVAL") {
@@ -1883,8 +1894,9 @@ export class OverlayFs implements IFileSystem {
         d.kind === "blocked" ||
         (d.kind === "found" && d.node.type === "whiteout")
       ) {
-        throw new Error(
-          `ENOENT: no such file or directory, realpath '${path}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, realpath '${path}'`,
         );
       }
       return d.kind === "found" ? (d.node as OverlayEntryNode) : undefined;
@@ -1899,8 +1911,9 @@ export class OverlayFs implements IFileSystem {
 
         // Check for loops
         if (seen.has(resolved)) {
-          throw new Error(
-            `ELOOP: too many levels of symbolic links, realpath '${path}'`,
+          throw new FsError(
+            "ELOOP",
+            `too many levels of symbolic links, realpath '${path}'`,
           );
         }
 
@@ -1915,8 +1928,9 @@ export class OverlayFs implements IFileSystem {
           loopCount++;
 
           if (seen.has(resolved)) {
-            throw new Error(
-              `ELOOP: too many levels of symbolic links, realpath '${path}'`,
+            throw new FsError(
+              "ELOOP",
+              `too many levels of symbolic links, realpath '${path}'`,
             );
           }
 
@@ -1924,8 +1938,9 @@ export class OverlayFs implements IFileSystem {
         }
 
         if (loopCount >= maxLoops) {
-          throw new Error(
-            `ELOOP: too many levels of symbolic links, realpath '${path}'`,
+          throw new FsError(
+            "ELOOP",
+            `too many levels of symbolic links, realpath '${path}'`,
           );
         }
 
@@ -1939,8 +1954,9 @@ export class OverlayFs implements IFileSystem {
               const stat = await lstatReal(canonical);
               if (stat.isSymbolicLink()) {
                 if (!this.allowSymlinks) {
-                  throw new Error(
-                    `ENOENT: no such file or directory, realpath '${path}'`,
+                  throw new FsError(
+                    "ENOENT",
+                    `no such file or directory, realpath '${path}'`,
                   );
                 }
                 const rawTarget = await fs.promises.readlink(canonical);
@@ -1954,8 +1970,9 @@ export class OverlayFs implements IFileSystem {
               }
             } catch (e) {
               if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-                throw new Error(
-                  `ENOENT: no such file or directory, realpath '${path}'`,
+                throw new FsError(
+                  "ENOENT",
+                  `no such file or directory, realpath '${path}'`,
                 );
               }
               this.sanitizeError(e, path, "realpath");
@@ -1969,8 +1986,9 @@ export class OverlayFs implements IFileSystem {
               try {
                 const stat = await lstatReal(canonicalWithBase);
                 if (stat.isSymbolicLink()) {
-                  throw new Error(
-                    `ENOENT: no such file or directory, realpath '${path}'`,
+                  throw new FsError(
+                    "ENOENT",
+                    `no such file or directory, realpath '${path}'`,
                   );
                 }
               } catch (e) {

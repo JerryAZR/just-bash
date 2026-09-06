@@ -992,7 +992,13 @@ function setupContext(
   _fs.promises.unlink = _fs.promises.rm;
   _fs.promises.rmdir = _fs.promises.rm;
   _fs.promises.access = function(p) {
-    return orig.exists(p) ? Promise.resolve() : Promise.reject(new Error('ENOENT: no such file or directory: ' + p));
+    if (orig.exists(p)) return Promise.resolve();
+    // Node-style error: prefixed message AND structured .code (the
+    // sanctioned pattern — no errno literal at the Error call site).
+    var msg = 'ENOENT: no such file or directory: ' + p;
+    var e = new Error(msg);
+    e.code = 'ENOENT';
+    return Promise.reject(e);
   };
 
   // process enhancements

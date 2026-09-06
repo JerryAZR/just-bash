@@ -308,13 +308,15 @@ export class OverlayTree {
     const parent = this.parentDirOf(segments, path);
     const current = parent.children.get(segments[segments.length - 1]);
     if (current?.type === "directory" && node.type !== "directory") {
-      throw new Error(
-        `EISDIR: cannot replace directory with ${node.type}, attach '${path}'`,
+      throw new FsError(
+        "EISDIR",
+        `cannot replace directory with ${node.type}, attach '${path}'`,
       );
     }
     if (current !== undefined && node.type === "directory") {
-      throw new Error(
-        `EEXIST: cannot replace ${current.type} with directory, attach '${path}'`,
+      throw new FsError(
+        "EEXIST",
+        `cannot replace ${current.type} with directory, attach '${path}'`,
       );
     }
     // The rules above never let attach() replace a non-empty directory, so
@@ -506,8 +508,9 @@ export class OverlayTree {
       added < 0 ||
       added > this.maxMemoryBytes - this.bytes + released
     ) {
-      throw new Error(
-        `ENOSPC: overlay memory byte limit exceeded (${this.maxMemoryBytes} bytes)`,
+      throw new FsError(
+        "ENOSPC",
+        `overlay memory byte limit exceeded (${this.maxMemoryBytes} bytes)`,
       );
     }
   }

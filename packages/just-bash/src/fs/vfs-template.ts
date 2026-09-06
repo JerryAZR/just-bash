@@ -70,8 +70,9 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   const seenAts = new Set<string>();
   for (const { at } of mounts) {
     if (seenAts.has(at)) {
-      throw new Error(
-        `EINVAL: duplicate mount point '${at}' in createVfsTemplate`,
+      throw new FsError(
+        "EINVAL",
+        `duplicate mount point '${at}' in createVfsTemplate`,
       );
     }
     seenAts.add(at);
@@ -142,8 +143,9 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
         ({ root }) => target === root || target.startsWith(root + nodePath.sep),
       );
       if (!inside) {
-        throw new Error(
-          `EINVAL: change-set entry outside every template root: '${target}'`,
+        throw new FsError(
+          "EINVAL",
+          `change-set entry outside every template root: '${target}'`,
         );
       }
       // Symlink containment: the canonical location of the entry (its
@@ -158,8 +160,9 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
           canonicalTarget.startsWith(root + nodePath.sep),
       );
       if (!canonInside) {
-        throw new Error(
-          `EINVAL: change-set entry escapes its root through a symlink: '${target}'`,
+        throw new FsError(
+          "EINVAL",
+          `change-set entry escapes its root through a symlink: '${target}'`,
         );
       }
     }

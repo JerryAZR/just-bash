@@ -125,8 +125,9 @@ export class ReadWriteFs implements IFileSystem {
       ? resolveCanonicalPath(realPath, this.canonicalRoot)
       : resolveCanonicalPathNoSymlinks(realPath, this.root, this.canonicalRoot);
     if (canonical === null) {
-      throw new Error(
-        `EACCES: permission denied, '${virtualPath}' resolves outside sandbox`,
+      throw new FsError(
+        "EACCES",
+        `permission denied, '${virtualPath}' resolves outside sandbox`,
       );
     }
     return canonical;
@@ -184,8 +185,9 @@ export class ReadWriteFs implements IFileSystem {
         if (this.maxFileReadSize > 0) {
           const stat = await fh.stat();
           if (stat.size > this.maxFileReadSize) {
-            throw new Error(
-              `EFBIG: file too large, read '${path}' (${stat.size} bytes, max ${this.maxFileReadSize})`,
+            throw new FsError(
+              "EFBIG",
+              `file too large, read '${path}' (${stat.size} bytes, max ${this.maxFileReadSize})`,
             );
           }
         }
@@ -203,8 +205,9 @@ export class ReadWriteFs implements IFileSystem {
         );
       }
       if (err.code === "EISDIR") {
-        throw new Error(
-          `EISDIR: illegal operation on a directory, read '${path}'`,
+        throw new FsError(
+          "EISDIR",
+          `illegal operation on a directory, read '${path}'`,
         );
       }
       if (err.code === "ELOOP") {
@@ -426,16 +429,18 @@ export class ReadWriteFs implements IFileSystem {
     virtualPath: string,
   ): void {
     if (this.maxCopyOnWriteSize > 0 && size > this.maxCopyOnWriteSize) {
-      throw new Error(
-        `EFBIG: file too large for copy-on-write ${operation} '${virtualPath}' (${size} bytes, max ${this.maxCopyOnWriteSize})`,
+      throw new FsError(
+        "EFBIG",
+        `file too large for copy-on-write ${operation} '${virtualPath}' (${size} bytes, max ${this.maxCopyOnWriteSize})`,
       );
     }
   }
 
   private assertCopySize(stat: fs.Stats, virtualPath: string): void {
     if (this.maxCopySize > 0 && stat.size > this.maxCopySize) {
-      throw new Error(
-        `EFBIG: file too large to copy '${virtualPath}' (${stat.size} bytes, max ${this.maxCopySize})`,
+      throw new FsError(
+        "EFBIG",
+        `file too large to copy '${virtualPath}' (${stat.size} bytes, max ${this.maxCopySize})`,
       );
     }
   }
@@ -830,8 +835,9 @@ export class ReadWriteFs implements IFileSystem {
           srcStat.dev === destEntryStat.dev &&
           srcStat.ino === destEntryStat.ino
         ) {
-          throw new Error(
-            `EINVAL: cannot copy '${src}' onto itself, '${dest}'`,
+          throw new FsError(
+            "EINVAL",
+            `cannot copy '${src}' onto itself, '${dest}'`,
           );
         }
       } catch (e) {
@@ -842,8 +848,9 @@ export class ReadWriteFs implements IFileSystem {
       try {
         const destStat = await fs.promises.stat(destCanonical);
         if (srcStat.dev === destStat.dev && srcStat.ino === destStat.ino) {
-          throw new Error(
-            `EINVAL: cannot copy '${src}' onto itself, '${dest}'`,
+          throw new FsError(
+            "EINVAL",
+            `cannot copy '${src}' onto itself, '${dest}'`,
           );
         }
       } catch (e) {
@@ -917,8 +924,9 @@ export class ReadWriteFs implements IFileSystem {
           sourceStat.dev !== stat.dev ||
           sourceStat.ino !== stat.ino
         ) {
-          throw new Error(
-            `EACCES: file identity changed, cp '${virtualSource}'`,
+          throw new FsError(
+            "EACCES",
+            `file identity changed, cp '${virtualSource}'`,
           );
         }
         await this.replaceFile(
@@ -934,8 +942,9 @@ export class ReadWriteFs implements IFileSystem {
     }
     if (stat.isSymbolicLink()) {
       if (!this.allowSymlinks) {
-        throw new Error(
-          `EACCES: permission denied, cp '${virtualSource}' contains a symlink`,
+        throw new FsError(
+          "EACCES",
+          `permission denied, cp '${virtualSource}' contains a symlink`,
         );
       }
       const rawTarget = await fs.promises.readlink(source);
@@ -988,8 +997,9 @@ export class ReadWriteFs implements IFileSystem {
     }
     if (!entryStat.isFile()) {
       if (entryStat.isDirectory()) return entryStat;
-      throw new Error(
-        `EACCES: cannot copy over special file '${virtualDestination}'`,
+      throw new FsError(
+        "EACCES",
+        `cannot copy over special file '${virtualDestination}'`,
       );
     }
 
@@ -1005,8 +1015,9 @@ export class ReadWriteFs implements IFileSystem {
         openedStat.dev !== entryStat.dev ||
         openedStat.ino !== entryStat.ino
       ) {
-        throw new Error(
-          `EACCES: destination changed, cp '${virtualDestination}'`,
+        throw new FsError(
+          "EACCES",
+          `destination changed, cp '${virtualDestination}'`,
         );
       }
     } finally {
@@ -1090,8 +1101,9 @@ export class ReadWriteFs implements IFileSystem {
       !isPathWithinRoot(canonicalTarget, this.canonicalRoot) ||
       !isPathWithinRoot(preservedTarget, this.canonicalRoot)
     ) {
-      throw new Error(
-        `EACCES: permission denied, cp '${virtualSource}' contains an unsafe symlink`,
+      throw new FsError(
+        "EACCES",
+        `permission denied, cp '${virtualSource}' contains an unsafe symlink`,
       );
     }
     const relative = preservedTarget.slice(this.canonicalRoot.length);
@@ -1110,14 +1122,16 @@ export class ReadWriteFs implements IFileSystem {
     }
     if (stat.isSymbolicLink()) {
       if (!this.allowSymlinks) {
-        throw new Error(
-          `EACCES: permission denied, cp '${virtualSource}' contains a symlink`,
+        throw new FsError(
+          "EACCES",
+          `permission denied, cp '${virtualSource}' contains a symlink`,
         );
       }
       const resolved = await fs.promises.realpath(source);
       if (!isPathWithinRoot(resolved, this.canonicalRoot)) {
-        throw new Error(
-          `EACCES: permission denied, cp '${virtualSource}' contains an unsafe symlink`,
+        throw new FsError(
+          "EACCES",
+          `permission denied, cp '${virtualSource}' contains an unsafe symlink`,
         );
       }
       return;
@@ -1186,8 +1200,9 @@ export class ReadWriteFs implements IFileSystem {
           .realpath(resolvedTarget)
           .catch(() => resolvedTarget);
         if (!isPathWithinRoot(canonicalTarget, this.canonicalRoot)) {
-          throw new Error(
-            `EACCES: permission denied, mv '${src}' -> '${dest}' would create symlink escaping sandbox`,
+          throw new FsError(
+            "EACCES",
+            `permission denied, mv '${src}' -> '${dest}' would create symlink escaping sandbox`,
           );
         }
       }
@@ -1238,8 +1253,9 @@ export class ReadWriteFs implements IFileSystem {
         if (escaping.length > 0) {
           // Undo the move
           await fs.promises.rename(destCanonical, srcCanonical);
-          throw new Error(
-            `EACCES: permission denied, mv '${src}' -> '${dest}' would create symlinks escaping sandbox`,
+          throw new FsError(
+            "EACCES",
+            `permission denied, mv '${src}' -> '${dest}' would create symlinks escaping sandbox`,
           );
         }
       }
@@ -1348,8 +1364,9 @@ export class ReadWriteFs implements IFileSystem {
         stagedStat.isDirectory() &&
         this.findEscapingSymlinks(stageReal).length > 0
       ) {
-        throw new Error(
-          `EACCES: permission denied, mv '${src}' -> '${dest}' would create symlinks escaping sandbox`,
+        throw new FsError(
+          "EACCES",
+          `permission denied, mv '${src}' -> '${dest}' would create symlinks escaping sandbox`,
         );
       }
       try {
@@ -1479,8 +1496,9 @@ export class ReadWriteFs implements IFileSystem {
       // would silently change its file type.
       if (!initialStat.isFile()) {
         if (!initialStat.isDirectory() && initialStat.nlink > 1) {
-          throw new Error(
-            `EACCES: cannot chmod multiply-linked special file '${path}'`,
+          throw new FsError(
+            "EACCES",
+            `cannot chmod multiply-linked special file '${path}'`,
           );
         }
         // Path-based metadata calls preserve directory and special-file
@@ -1620,16 +1638,18 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(
-          `ENOENT: no such file or directory, link '${existingPath}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, link '${existingPath}'`,
         );
       }
       if (err.code === "EEXIST") {
         throw new FsError("EEXIST", `file already exists, link '${newPath}'`);
       }
       if (err.code === "EPERM") {
-        throw new Error(
-          `EPERM: operation not permitted, link '${existingPath}'`,
+        throw new FsError(
+          "EPERM",
+          `operation not permitted, link '${existingPath}'`,
         );
       }
       this.sanitizeError(e, existingPath, "link");
@@ -1680,8 +1700,9 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(
-          `ENOENT: no such file or directory, readlink '${path}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, readlink '${path}'`,
         );
       }
       if (err.code === "EINVAL") {
@@ -1719,13 +1740,15 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(
-          `ENOENT: no such file or directory, realpath '${path}'`,
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, realpath '${path}'`,
         );
       }
       if (err.code === "ELOOP") {
-        throw new Error(
-          `ELOOP: too many levels of symbolic links, realpath '${path}'`,
+        throw new FsError(
+          "ELOOP",
+          `too many levels of symbolic links, realpath '${path}'`,
         );
       }
       this.sanitizeError(e, path, "realpath");
@@ -1771,8 +1794,9 @@ export class ReadWriteFs implements IFileSystem {
       const initialStat = await fs.promises.lstat(canonical);
       if (!initialStat.isFile()) {
         if (!initialStat.isDirectory() && initialStat.nlink > 1) {
-          throw new Error(
-            `EACCES: cannot change times on multiply-linked special file '${path}'`,
+          throw new FsError(
+            "EACCES",
+            `cannot change times on multiply-linked special file '${path}'`,
           );
         }
         // Path-based metadata calls preserve directory and special-file

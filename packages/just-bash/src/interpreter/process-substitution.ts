@@ -28,6 +28,7 @@
 
 import type { ProcessSubstitutionPart, ScriptNode } from "../ast/types.js";
 import { latin1FromBytes, readBytesFrom, stdoutAsBytes } from "../encoding.js";
+import { FsError } from "../fs/fs-error.js";
 import { InMemoryFs } from "../fs/in-memory-fs/index.js";
 import type {
   BufferEncoding,
@@ -95,8 +96,9 @@ class ProcessSubstitutionFs extends InMemoryFs {
   }
 
   private refuse(path: string, operation: string): never {
-    throw new Error(
-      `EROFS: read-only file system, ${operation} '${PROC_SUB_DIR}${path}'`,
+    throw new FsError(
+      "EROFS",
+      `read-only file system, ${operation} '${PROC_SUB_DIR}${path}'`,
     );
   }
 

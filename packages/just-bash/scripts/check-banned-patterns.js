@@ -42,6 +42,9 @@ import { fileURLToPath } from "node:url";
 const BANNED_PATTERNS = [
   {
     name: "Errno-prefixed plain Error",
+    // Also scanned against whole-file content: the throw's string literal
+    // may sit on the line after `new Error(` and a per-line scan misses it.
+    multiline: true,
     // Errno codes must be carried structurally on .code, never embedded
     // in message prose where consumers re-derive them by string parsing
     // (the errno-lie class). Matches single- and multi-line literals.
@@ -999,6 +1002,32 @@ function scanFile(filePath) {
           result.usedIgnoreComment.used = true;
         }
       }
+    }
+  }
+
+  // Whole-content pass for rules that can span lines (multiline: true).
+  for (const pattern of BANNED_PATTERNS) {
+    if (pattern.multiline !== true) continue;
+    if (isSecurityModule && pattern.scanSecurity !== true) continue;
+    if (pattern.filePattern && !pattern.filePattern.test(filePath)) continue;
+    // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
+    const re = new RegExp(pattern.pattern.source, "g");
+    let match = re.exec(content);
+    while (match !== null) {
+      const lineIndex = content.slice(0, match.index).split("\n").length - 1;
+      const result = isLineSafe(lines, lineIndex, pattern, filePath);
+      if (!result.safe) {
+        violations.push({
+          file: filePath,
+          line: lineIndex + 1,
+          content: lines[lineIndex].trim(),
+          context: getContext(lines, lineIndex),
+          pattern,
+        });
+      } else if (result.usedIgnoreComment) {
+        result.usedIgnoreComment.used = true;
+      }
+      match = re.exec(content);
     }
   }
 }

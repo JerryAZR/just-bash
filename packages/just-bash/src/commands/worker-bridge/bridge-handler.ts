@@ -6,7 +6,7 @@
  */
 
 import { fromBuffer } from "../../fs/encoding.js";
-import { fsErrorCode } from "../../fs/fs-error.js";
+import { FsError, fsErrorCode } from "../../fs/fs-error.js";
 import type { IFileSystem } from "../../fs/interface.js";
 import {
   sanitizeErrorMessage,
@@ -328,8 +328,9 @@ export class BridgeHandler {
         // else rather than corrupt the file silently.
         const st = await this.fs.stat(path);
         if (st.size !== offset) {
-          throw new Error(
-            `EIO: non-sequential range write to '${path}': offset ${offset} != size ${st.size}`,
+          throw new FsError(
+            "EIO",
+            `non-sequential range write to '${path}': offset ${offset} != size ${st.size}`,
           );
         }
         await this.fs.appendFile(path, data);

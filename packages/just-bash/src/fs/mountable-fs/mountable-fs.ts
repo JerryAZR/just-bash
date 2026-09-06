@@ -585,8 +585,9 @@ export class MountableFs implements IFileSystem {
 
     // Hard links must be within the same filesystem
     if (existingRoute.fs !== newRoute.fs) {
-      throw new Error(
-        `EXDEV: cross-device link not permitted, link '${existingPath}' -> '${newPath}'`,
+      throw new FsError(
+        "EXDEV",
+        `cross-device link not permitted, link '${existingPath}' -> '${newPath}'`,
       );
     }
 

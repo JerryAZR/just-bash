@@ -27,7 +27,9 @@ export class FsError extends Error {
 
   constructor(code: string, message: string) {
     super(message.startsWith(`${code}:`) ? message : `${code}: ${message}`);
-    this.name = "FsError";
+    // NOTE: name stays "Error" — String(err) is display surface (stderrs,
+    // guest errors) and node fs errors also render as "Error: ENOENT: ...".
+    // Identity lives in instanceof and .code, not in the rendered name.
     this.code = code;
     this.bareMessage = message.startsWith(`${code}: `)
       ? message.slice(code.length + 2)

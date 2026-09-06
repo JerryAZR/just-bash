@@ -116,8 +116,9 @@ export class InMemoryFs implements IFileSystem {
       prospectiveBytes < 0 ||
       prospectiveBytes > this.maxTotalBytes - this.retainedBytes + releasedBytes
     ) {
-      throw new Error(
-        `ENOSPC: in-memory filesystem byte limit exceeded (${this.maxTotalBytes} bytes)`,
+      throw new FsError(
+        "ENOSPC",
+        `in-memory filesystem byte limit exceeded (${this.maxTotalBytes} bytes)`,
       );
     }
   }
@@ -141,8 +142,9 @@ export class InMemoryFs implements IFileSystem {
           : nextContent.byteLength
         : this.storedByteLength(nextContent);
     if (addedBytes > this.maxTotalBytes - this.retainedBytes + releasedBytes) {
-      throw new Error(
-        `ENOSPC: in-memory filesystem byte limit exceeded (${this.maxTotalBytes} bytes)`,
+      throw new FsError(
+        "ENOSPC",
+        `in-memory filesystem byte limit exceeded (${this.maxTotalBytes} bytes)`,
       );
     }
 
@@ -342,8 +344,9 @@ export class InMemoryFs implements IFileSystem {
       throw new FsError("ENOENT", `no such file or directory, open '${path}'`);
     }
     if (entry.type !== "file") {
-      throw new Error(
-        `EISDIR: illegal operation on a directory, read '${path}'`,
+      throw new FsError(
+        "EISDIR",
+        `illegal operation on a directory, read '${path}'`,
       );
     }
 
@@ -381,8 +384,9 @@ export class InMemoryFs implements IFileSystem {
     const existing = this.data.get(normalized);
 
     if (existing && existing.type === "directory") {
-      throw new Error(
-        `EISDIR: illegal operation on a directory, write '${path}'`,
+      throw new FsError(
+        "EISDIR",
+        `illegal operation on a directory, write '${path}'`,
       );
     }
 
@@ -550,8 +554,9 @@ export class InMemoryFs implements IFileSystem {
 
       while (entry && entry.type === "symlink" && loopCount < maxLoops) {
         if (seen.has(resolvedPath)) {
-          throw new Error(
-            `ELOOP: too many levels of symbolic links, lstat '${path}'`,
+          throw new FsError(
+            "ELOOP",
+            `too many levels of symbolic links, lstat '${path}'`,
           );
         }
         seen.add(resolvedPath);
@@ -561,8 +566,9 @@ export class InMemoryFs implements IFileSystem {
       }
 
       if (loopCount >= maxLoops) {
-        throw new Error(
-          `ELOOP: too many levels of symbolic links, lstat '${path}'`,
+        throw new FsError(
+          "ELOOP",
+          `too many levels of symbolic links, lstat '${path}'`,
         );
       }
     }
@@ -594,8 +600,9 @@ export class InMemoryFs implements IFileSystem {
 
       while (entry && entry.type === "symlink" && loopCount < maxLoops) {
         if (seen.has(resolvedPath)) {
-          throw new Error(
-            `ELOOP: too many levels of symbolic links, open '${path}'`,
+          throw new FsError(
+            "ELOOP",
+            `too many levels of symbolic links, open '${path}'`,
           );
         }
         seen.add(resolvedPath);
@@ -607,8 +614,9 @@ export class InMemoryFs implements IFileSystem {
       }
 
       if (loopCount >= maxLoops) {
-        throw new Error(
-          `ELOOP: too many levels of symbolic links, open '${path}'`,
+        throw new FsError(
+          "ELOOP",
+          `too many levels of symbolic links, open '${path}'`,
         );
       }
     }
@@ -682,8 +690,9 @@ export class InMemoryFs implements IFileSystem {
     const seen = new Set<string>();
     while (entry && entry.type === "symlink") {
       if (seen.has(normalized)) {
-        throw new Error(
-          `ELOOP: too many levels of symbolic links, scandir '${path}'`,
+        throw new FsError(
+          "ELOOP",
+          `too many levels of symbolic links, scandir '${path}'`,
         );
       }
       seen.add(normalized);
@@ -894,8 +903,9 @@ export class InMemoryFs implements IFileSystem {
 
     const entry = this.data.get(existingNorm);
     if (!entry) {
-      throw new Error(
-        `ENOENT: no such file or directory, link '${existingPath}'`,
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, link '${existingPath}'`,
       );
     }
 
