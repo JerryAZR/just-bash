@@ -75,7 +75,35 @@ export class SyncBackend {
 
     const status = this.protocol.getStatus();
     if (status === Status.SUCCESS) {
-      return { success: true, result: this.protocol.getResult() };
+      const totalLength = this.protocol.getResultLength();
+      if (totalLength <= Size.DATA_BUFFER) {
+        return { success: true, result: this.protocol.getResult() };
+      }
+      // Oversized result: the first DATA_BUFFER bytes are in the region
+      // and the host retains the full buffer. Assemble the rest with
+      // generic range reads — transparent for every op (file reads,
+      // HTTP responses, tool results, exec output, readdir).
+      const content = new Uint8Array(totalLength);
+      content.set(this.protocol.getResult().subarray(0, Size.DATA_BUFFER), 0);
+      let offset = Size.DATA_BUFFER;
+      while (offset < totalLength) {
+        const length = Math.min(Size.DATA_BUFFER, totalLength - offset);
+        const slice = this.execSync(
+          OpCode.READ_RESULT_RANGE,
+          "",
+          undefined,
+          offset,
+          length,
+        );
+        if (!slice.success) {
+          throw this.opError_("Failed to read result range", slice);
+        }
+        const chunk = slice.result ?? new Uint8Array(0);
+        content.set(chunk, offset);
+        offset += chunk.length;
+        if (chunk.length === 0) break; // defensive: no progress
+      }
+      return { success: true, result: content };
     }
     return {
       success: false,

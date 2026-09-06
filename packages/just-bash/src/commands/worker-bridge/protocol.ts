@@ -42,6 +42,11 @@ export const OpCode = {
   // (READ_FILE_RANGE only — a write's length is its DATA_LENGTH).
   READ_FILE_RANGE: 16,
   WRITE_FILE_RANGE: 17,
+  // Fetch the next slice of an oversized result (any op). The host
+  // publishes the first DATA_BUFFER bytes with the FULL length in
+  // RESULT_LENGTH and retains the complete buffer; the worker loops
+  // this op (FLAGS = offset, MODE = length) to assemble the rest.
+  READ_RESULT_RANGE: 18,
   // Special operations for I/O
   WRITE_STDOUT: 100,
   WRITE_STDERR: 101,
@@ -274,6 +279,18 @@ export class ProtocolBuffer {
       throw new Error(`Result too large: ${data.length} > ${Size.DATA_BUFFER}`);
     }
     this.uint8View.set(data, Offset.DATA_BUFFER);
+    this.setResultLength(data.length);
+  }
+
+  /**
+   * Publish a result of ANY size: the first DATA_BUFFER bytes land in
+   * the data region and RESULT_LENGTH carries the FULL length. The
+   * worker detects the overflow and fetches the rest with
+   * READ_RESULT_RANGE ops (served from the host's retained buffer).
+   */
+  setResultPrefix(data: Uint8Array): void {
+    const n = Math.min(data.length, Size.DATA_BUFFER);
+    this.uint8View.set(data.subarray(0, n), Offset.DATA_BUFFER);
     this.setResultLength(data.length);
   }
 

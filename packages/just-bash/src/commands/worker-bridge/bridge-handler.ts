@@ -42,6 +42,10 @@ export class BridgeHandler {
   private outputLimitExceeded = false;
   private startTime = 0;
   private timeoutMs = 0;
+  /** Complete buffer of the last published oversized result, retained
+   * so the worker can fetch it in READ_RESULT_RANGE slices. Replaced on
+   * every publish. */
+  private lastResult: Uint8Array | null = null;
 
   constructor(
     sharedBuffer: SharedArrayBuffer,
@@ -169,6 +173,9 @@ export class BridgeHandler {
         case OpCode.READ_FILE_RANGE:
           await this.handleReadFileRange();
           break;
+        case OpCode.READ_RESULT_RANGE:
+          this.handleReadResultRange();
+          break;
         case OpCode.WRITE_FILE_RANGE:
           await this.handleWriteFileRange();
           break;
@@ -226,6 +233,32 @@ export class BridgeHandler {
     }
   }
 
+  /** Publish a result of any size; oversized results are fetched by the
+   * worker in READ_RESULT_RANGE slices from the retained buffer. */
+  private publishResult(data: Uint8Array | string): void {
+    const bytes =
+      typeof data === "string" ? new TextEncoder().encode(data) : data;
+    this.lastResult = bytes;
+    this.protocol.setResultPrefix(bytes);
+    this.protocol.setStatus(Status.SUCCESS);
+  }
+
+  private handleReadResultRange(): void {
+    const offset = this.protocol.getFlags();
+    const length = this.protocol.getMode();
+    const retained = this.lastResult;
+    if (!retained || offset > retained.length) {
+      this.protocol.setErrorCode(ErrorCode.IO_ERROR);
+      this.protocol.setResultFromString("No retained result for range read");
+      this.protocol.setStatus(Status.ERROR);
+      return;
+    }
+    // Serve via setResult (fits the buffer), NOT publishResult — a
+    // range read must not replace the buffer it is reading from.
+    this.protocol.setResult(retained.subarray(offset, offset + length));
+    this.protocol.setStatus(Status.SUCCESS);
+  }
+
   private resolvePath(path: string): string {
     return this.fs.resolvePath(this.cwd, path);
   }
@@ -234,8 +267,7 @@ export class BridgeHandler {
     const path = this.resolvePath(this.protocol.getPath());
     try {
       const content = await this.fs.readFileBuffer(path);
-      this.protocol.setResult(content);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.publishResult(content);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -315,8 +347,7 @@ export class BridgeHandler {
     const path = this.resolvePath(this.protocol.getPath());
     try {
       const entries = await this.fs.readdir(path);
-      this.protocol.setResultFromString(JSON.stringify(entries));
-      this.protocol.setStatus(Status.SUCCESS);
+      this.publishResult(JSON.stringify(entries));
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -578,8 +609,7 @@ export class BridgeHandler {
         bodyBase64: fromBuffer(result.body, "base64"),
         url: result.url,
       });
-      this.protocol.setResultFromString(response);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.publishResult(response);
     } catch (e) {
       const message = sanitizeErrorMessage(
         e instanceof Error ? e.message : String(e),
@@ -632,8 +662,7 @@ export class BridgeHandler {
         stderr: result.stderr,
         exitCode: result.exitCode,
       });
-      this.protocol.setResultFromString(response);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.publishResult(response);
     } catch (e) {
       controller.abort();
       const message = e instanceof Error ? e.message : String(e);
@@ -661,8 +690,7 @@ export class BridgeHandler {
       const resultJson = await this.raceDeadline(() =>
         DefenseInDepthBox.runTrustedAsync(() => invokeToolFn(path, argsJson)),
       );
-      this.protocol.setResultFromString(resultJson);
-      this.protocol.setStatus(Status.SUCCESS);
+      this.publishResult(resultJson);
     } catch (e) {
       const message = sanitizeHostErrorMessage(
         e instanceof Error ? e.message : String(e),
