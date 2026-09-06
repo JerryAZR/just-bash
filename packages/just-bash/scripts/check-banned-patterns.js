@@ -1015,10 +1015,9 @@ function scanFile(filePath) {
     if (pattern.multiline !== true) continue;
     if (isSecurityModule && pattern.scanSecurity !== true) continue;
     if (pattern.filePattern && !pattern.filePattern.test(filePath)) continue;
-    // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
     const flags = pattern.pattern.flags.includes("g")
       ? pattern.pattern.flags
-      : pattern.pattern.flags + "g";
+      : `${pattern.pattern.flags}g`;
     // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
     const re = new RegExp(pattern.pattern.source, flags);
     let match = re.exec(content);
