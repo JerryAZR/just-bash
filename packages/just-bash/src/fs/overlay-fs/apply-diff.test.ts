@@ -163,9 +163,7 @@ describe("symlink application", () => {
           ],
           deletions: [],
         });
-        expect(fs.readlinkSync(path.join(root, "link.txt"))).toBe(
-          "real.txt",
-        );
+        expect(fs.readlinkSync(path.join(root, "link.txt"))).toBe("real.txt");
         expect(fs.readFileSync(path.join(root, "link.txt"), "utf8")).toBe(
           "content",
         );
