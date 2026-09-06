@@ -30,16 +30,18 @@ const results = await Promise.all(
   }),
 );
 
-// 3. Barrier: merge (completion order is the conflict tiebreak)…
-const merged = tpl.merge([/* the forks, in completion order */]);
+// 3. Barrier: merge (array order is the conflict tiebreak)…
+const merged = await tpl.merge([/* the forks, in completion order */]);
 
-// 4. …review the merged diff (real absolute paths, ready to audit)…
-console.log(merged.writes.map((w) => w.path));
+// 4. …review the merged diff (host-absolute paths, ready to audit)…
+console.log(merged.diff({ space: "host" }).writes.map((w) => w.path));
 
 // 5. …and apply to disk in one step.
-tpl.apply(merged);
+tpl.apply(merged.diff({ space: "host" }));
 
-// 6. Next round: fork() again — forks are single-use.
+// 6. Next round: fork() again — forks are unmanaged; discard is the
+//    reconciliation. The merged instance is itself a live fork:
+//    diff it and drop it, or keep working on it.
 ```
 
 What each call sees:

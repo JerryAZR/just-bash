@@ -1,3 +1,4 @@
+import nodePath from "node:path";
 import { type ByteString, readBytesFrom } from "../../encoding.js";
 import { FsError, isFsErrorCode } from "../fs-error.js";
 import { InMemoryFs } from "../in-memory-fs/in-memory-fs.js";
@@ -12,6 +13,7 @@ import type {
   RmOptions,
   WriteFileOptions,
 } from "../interface.js";
+import type { OverlayDiff, OverlayWrite } from "../overlay-fs/overlay-fs.js";
 import {
   DEFAULT_DIR_MODE,
   isSameOrDescendantPath,
@@ -124,6 +126,74 @@ export class MountableFs implements IFileSystem {
       mountPoint: entry.mountPoint,
       filesystem: entry.filesystem,
     }));
+  }
+
+  /**
+   * Combined change set across all diff-capable mounts. `space` selects
+   * the path form: "vfs" (default) keeps full virtual paths (mount
+   * prefix retained — directly replayable by a template merge);
+   * "host" maps each entry to its real-absolute host path (for
+   * template.apply / applyDiffToRealFs). The base fs is shared scratch
+   * and is not diffed. Mounts without a diff() method fail loudly —
+   * a merged view cannot silently omit a mount's changes.
+   */
+  diff(options?: { space?: "vfs" | "host" }): OverlayDiff {
+    const space = options?.space ?? "vfs";
+    const writes: OverlayWrite[] = [];
+    const deletions: string[] = [];
+    const deletionChangedAt: number[] = [];
+    for (const entry of this.mounts.values()) {
+      const fs = entry.filesystem as {
+        diff?: () => OverlayDiff;
+        rootDir?: string;
+      };
+      if (typeof fs.diff !== "function") {
+        throw new FsError(
+          "EINVAL",
+          `mounted filesystem at '${entry.mountPoint}' does not support diff()`,
+        );
+      }
+      const raw = fs.diff();
+      const map = (rel: string): string => {
+        if (space === "vfs") {
+          return entry.mountPoint === "/" ? rel : `${entry.mountPoint}${rel}`;
+        }
+        if (typeof fs.rootDir !== "string") {
+          throw new FsError(
+            "EINVAL",
+            `cannot produce a host-space diff: mount at '${entry.mountPoint}' has no real root`,
+          );
+        }
+        return nodePath.join(fs.rootDir, rel);
+      };
+      for (const w of raw.writes) {
+        writes.push({ ...w, path: map(w.path) });
+      }
+      for (let i = 0; i < raw.deletions.length; i++) {
+        deletions.push(map(raw.deletions[i]));
+        deletionChangedAt.push(raw.deletionChangedAt?.[i] ?? 0);
+      }
+    }
+    return {
+      writes,
+      deletions,
+      ...(deletionChangedAt.length > 0 && { deletionChangedAt }),
+    };
+  }
+
+  /**
+   * Reconciliation support (template merge replay): set the changedAt
+   * ordering stamp of the node at `path` and its ancestors, routing to
+   * the owning mount. Paths outside every mount (shared scratch) have
+   * no stampable overlay and are ignored.
+   */
+  restamp(path: string, changedAt: number): void {
+    const { fs, relativePath } = this.routePath(path);
+    const restamp = (fs as { restamp?: (p: string, t: number) => void })
+      .restamp;
+    if (typeof restamp === "function") {
+      restamp.call(fs, relativePath, changedAt);
+    }
   }
 
   /**

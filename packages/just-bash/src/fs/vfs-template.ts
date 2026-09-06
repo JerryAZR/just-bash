@@ -1,10 +1,9 @@
-import * as nodePath from "node:path";
+import nodePath from "node:path";
 import { FsError } from "./fs-error.js";
-import { InMemoryFs } from "./in-memory-fs/index.js";
+import { InMemoryFs } from "./in-memory-fs/in-memory-fs.js";
 import { MountableFs } from "./mountable-fs/mountable-fs.js";
 import { applyDiffToRealFs, canonicalizeRealPath } from "./overlay-fs/apply.js";
-import { mergeDiffs } from "./overlay-fs/merge.js";
-import type { OverlayDiff, OverlayFs } from "./overlay-fs/overlay-fs.js";
+import type { OverlayDiff, OverlayWrite } from "./overlay-fs/overlay-fs.js";
 import { OverlayFs as OverlayFsImpl } from "./overlay-fs/overlay-fs.js";
 
 /** One privatized subtree: virtual mount point + real backing root. */
@@ -18,42 +17,55 @@ export interface VfsTemplateMount {
 export interface VfsTemplateOptions {
   /**
    * Subtrees privatized per fork. Everything else (/, /tmp, ...) lives
-   * in the template's shared in-memory scratch fs and behaves like
-   * shared memory: visible to every fork immediately.
+   * in the template's shared scratch memory fs: writes there are
+   * visible to every fork immediately and never appear in diffs.
    */
   mounts: VfsTemplateMount[];
 }
 
 /**
- * A process image for parallel agent tool calls (see
+ * Template for cheap parallel forks (see
  * docs/design/vfs-template-fork-model.md). The template owns the shared
  * scratch fs and the mount configuration; each fork() stamps out a
  * ready MountableFs with fresh copy-on-write overlays over every
- * mounted real root. Forks are single-use: run, diff via merge(),
- * discard.
+ * mounted real root. Forks are unmanaged: the template keeps no
+ * registry, consumes nothing, and never tracks lifecycles.
+ *
+ * MERGE IS A REPLAY. `merge` combines the given change sets (fork
+ * instances are diffed in vfs space; plain diffs pass through), orders
+ * every entry by (changedAt, input order), and applies the entries to a
+ * fresh fork with the stock filesystem operations — the same codepath
+ * the forks themselves used, over the same lower. Anything the
+ * filesystem refuses (write under a file, chmod of a deleted path, ...)
+ * is skipped, which keeps conflicting (racy) input deterministic and
+ * contained to the conflicted path. After each replayed operation the
+ * touched node's changedAt is rewritten from the replay position, so
+ * merged output is byte-deterministic and wall-clock-free. The merged
+ * fork is returned: diff it and discard it, or keep working on it.
  *
  * ```ts
  * const tpl = createVfsTemplate({ mounts: [{ at: "/project", root: projDir }] });
  * const a = tpl.fork();
  * const b = tpl.fork();
- * await Promise.all([runA(a), runB(b)]);
- * const merged = tpl.merge([a, b]);  // completion order = tiebreak
- * tpl.apply(merged);
+ * await Promise.all([runAgent(a), runAgent(b)]);
+ * const merged = await tpl.merge([a, b]);
+ * tpl.apply(merged.diff({ space: "host" }));
  * ```
  */
 export interface VfsTemplate {
   /** A fresh per-call filesystem: shared scratch + fresh overlays. */
   fork(): MountableFs;
   /**
-   * Merge the change sets of the given forks (in completion order —
-   * the tiebreak under changedAt) into one diff with real absolute
-   * paths. Forks not listed are merged after, in registration order.
+   * Replay the given sources' change sets onto a fresh fork and return
+   * it. Sources may be fork instances (diffed in vfs space) or plain
+   * diffs (e.g. serialized across a process boundary). Array order is
+   * the tie-break for equal changedAt stamps.
    */
-  merge(forksInCompletionOrder?: MountableFs[]): OverlayDiff;
+  merge(sources: Array<MountableFs | OverlayDiff>): Promise<MountableFs>;
   /**
-   * Validate a merged diff against the mount map (an entry outside
-   * every registered root fails loudly) and apply it to the real
-   * roots. Consumes all registered forks.
+   * Validate a merged host-space diff against the mount map (every
+   * entry inside a registered root, symlink containment) and apply it
+   * to the real filesystem.
    */
   apply(merged: OverlayDiff): void;
 }
@@ -79,59 +91,89 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   }
 
   const scratch = new InMemoryFs();
-  const registry = new Map<MountableFs, Map<string, OverlayFs>>();
 
-  const fork = (): MountableFs => {
+  const makeVfs = (): MountableFs => {
     const vfs = new MountableFs({ base: scratch });
-    const overlays = new Map<string, OverlayFs>();
     for (const { at, root } of mounts) {
-      const overlay = new OverlayFsImpl({ root, mountPoint: "/" });
-      vfs.mount(at, overlay);
-      overlays.set(at, overlay);
+      vfs.mount(at, new OverlayFsImpl({ root, mountPoint: "/" }));
     }
-    registry.set(vfs, overlays);
     return vfs;
   };
 
-  const toAbsoluteDiff = (overlays: Map<string, OverlayFs>): OverlayDiff => {
-    const writes = [];
-    const deletions: string[] = [];
-    const deletionChangedAt: number[] = [];
-    for (const [at, overlay] of overlays) {
-      const root = mounts.find((m) => m.at === at)?.root;
-      if (!root) continue;
-      const diff = overlay.diff();
-      for (const { path: rel, ...write } of diff.writes) {
-        writes.push({ ...write, path: nodePath.join(root, rel) });
+  const fork = (): MountableFs => makeVfs();
+
+  const merge = async (
+    sources: Array<MountableFs | OverlayDiff>,
+  ): Promise<MountableFs> => {
+    type Entry =
+      | { kind: "write"; changedAt: number; order: number; write: OverlayWrite }
+      | { kind: "delete"; changedAt: number; order: number; path: string };
+
+    const entries: Entry[] = [];
+    let order = 0;
+    for (const source of sources) {
+      const diff =
+        source instanceof MountableFs ? source.diff({ space: "vfs" }) : source;
+      for (const write of diff.writes) {
+        const changedAt = write.changedAt ?? 0;
+        entries.push({ kind: "write", changedAt, order: order++, write });
       }
       for (let i = 0; i < diff.deletions.length; i++) {
-        deletions.push(nodePath.join(root, diff.deletions[i]));
-        deletionChangedAt.push(diff.deletionChangedAt?.[i] ?? 0);
+        const changedAt = diff.deletionChangedAt?.[i] ?? 0;
+        entries.push({
+          kind: "delete",
+          changedAt,
+          order: order++,
+          path: diff.deletions[i],
+        });
       }
     }
-    return {
-      writes,
-      deletions,
-      ...(deletions.length > 0 && { deletionChangedAt }),
-    };
-  };
-
-  const merge = (forksInCompletionOrder?: MountableFs[]): OverlayDiff => {
-    const listed = forksInCompletionOrder ?? [];
-    const rest = [...registry.keys()].filter((f) => !listed.includes(f));
-    const ordered = [...listed, ...rest];
-    return mergeDiffs(
-      ordered.map((f) => {
-        const overlays = registry.get(f);
-        if (!overlays) {
-          throw new FsError(
-            "EINVAL",
-            "merge() got a filesystem this template did not fork",
-          );
-        }
-        return toAbsoluteDiff(overlays);
-      }),
+    entries.sort((a, b) =>
+      a.changedAt !== b.changedAt
+        ? a.changedAt - b.changedAt
+        : a.order - b.order,
     );
+
+    const target = makeVfs();
+    for (const entry of entries) {
+      try {
+        if (entry.kind === "delete") {
+          await target.rm(entry.path, { recursive: true });
+        } else {
+          const w = entry.write;
+          if (w.metadataOnly) {
+            if (w.mode !== undefined) await target.chmod(w.path, w.mode);
+            if (w.mtime !== undefined) {
+              await target.utimes(w.path, w.mtime, w.mtime);
+            }
+          } else if (w.nodeType === "directory") {
+            await target.mkdir(w.path);
+            if (w.mode !== undefined) await target.chmod(w.path, w.mode);
+            if (w.mtime !== undefined) {
+              await target.utimes(w.path, w.mtime, w.mtime);
+            }
+          } else if (w.nodeType === "symlink") {
+            // Symlink mode/mtime are not honored by the fs layer.
+            await target.symlink(new TextDecoder().decode(w.content), w.path);
+          } else {
+            await target.writeFile(w.path, w.content);
+            if (w.mode !== undefined) await target.chmod(w.path, w.mode);
+            if (w.mtime !== undefined) {
+              await target.utimes(w.path, w.mtime, w.mtime);
+            }
+          }
+        }
+        target.restamp(
+          entry.kind === "delete" ? entry.path : entry.write.path,
+          entry.changedAt,
+        );
+      } catch {
+        // The filesystem refused (ENOTDIR under a file, ENOENT on a
+        // missing chmod/rm target, EEXIST on mkdir, EPERM on symlink):
+        // conflicting input, refusal contained to this path — skip.
+      }
+    }
+    return target;
   };
 
   const apply = (merged: OverlayDiff): void => {
@@ -167,7 +209,6 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
       }
     }
     applyDiffToRealFs(merged);
-    registry.clear();
   };
 
   return { fork, merge, apply };

@@ -75,24 +75,33 @@ shared memory — visible immediately to all forks, with ordinary
 process-on-shared-fs semantics. This is the whole API intuition; if a
 behavior surprises you, ask what fork would do.
 
-**Forks are single-use.** After the barrier, discard them. Next round
-forks fresh overlays on the now-updated roots. There is no `drop()`,
-`sync()`, or `reset()` in this model — discarding *is* the
-reconciliation.
+**Forks are unmanaged.** The template keeps no registry and consumes
+nothing: fork, run, diff, merge, discard — tracking lifecycles is the
+harness's business. A fork's `diff()` is a cumulative snapshot, so
+merging the same fork twice is idempotent-by-construction (replaying
+identical entries onto a fresh target reproduces them); doing so is
+redundant, not wrong. There is no `drop()`, `sync()`, or `reset()` in
+this model — discarding *is* the reconciliation.
 
-## Decision: real absolute paths, never a rootDir
+## Decision: vfs paths inside the model, host paths at the boundary
 
-Merged diffs use **real absolute paths** (`/real/project/src/app.ts`),
-produced by mapping each fork's mount-relative diff through its mount's
-`root`. Consequences:
+Diffs come in two path spaces, selected per call
+(`diff({ space: "vfs" | "host" })`, default mount-relative):
 
-- Apply needs **no `rootDir` parameter** — paths are self-describing.
-  A root parameter would be redundant and a double-rooting hazard.
-- **Multiple mounts are incoherent with any single root**, so they
-  forced this choice. `createVfsTemplate({ mounts: [{at, root}, ...] })`
-  is the general case; one mount is the special case.
-- This matches the `createAgentSandbox` combined-diff decision
-  ("apply-ready paths"). Both diff families speak real paths.
+- **`"vfs"`**: full virtual paths, mount prefix retained
+  (`/project/src/app.ts`). A vfs diff from one fork replays directly on
+  any other fork of the same template — they share mounts and vfs
+  resolution by construction. This is the merge's input space.
+- **`"host"`**: real absolute paths (`/real/project/src/app.ts`), each
+  entry mapped through its mount's `root`. Self-describing, so apply
+  needs **no `rootDir` parameter**, and multiple mounts stay coherent.
+  This is the space `template.apply()` and `applyDiffToRealFs()`
+  consume, and what external harnesses serialize across processes.
+
+The earlier draft mapped everything to real-absolute inside the merge;
+the fork-replay model made that unnecessary — the merge never leaves
+vfs space, and only the final boundary (apply, cross-process export)
+speaks host paths.
 
 ## Decision: `changedAt`, not `mtime`, not magic ordering
 
@@ -133,39 +142,54 @@ construction (the generic assembly is op-agnostic — the three tested
 channels prove the loop); no dedicated multi-hundred-thousand-entry
 test exists for it.
 
-## Merge semantics (last-touch-wins, precisely)
+## Merge semantics: a replay, not an arbitration
 
-For each real path, entries compete in `changedAt` order (ties: input
-order); the winner takes the path wholesale:
+`template.merge(sources)` is literally a replay. Every entry from every
+source (fork instances are diffed in vfs space; plain diffs pass
+through) is ordered by (`changedAt`, input order) — missing stamps
+count as 0 — and applied to a **fresh fork** (empty upper over the same
+lower) with the stock filesystem operations. The result is that fork's
+ordinary `diff()`. There is no merge-specific logic beyond this.
 
-- **Write vs whiteout**: later entry wins. Fork A deletes `/x`, fork B
-  writes `/x` — if B's entry is later, `/x` exists (B's content); if A's
-  is later, `/x` is deleted and B's write is discarded.
-- **Directory whiteouts have subtree scope**: a whiteout on `/out`
-  suppresses exactly the entries at-or-under `/out` that are *earlier*
-  than it. Later entries survive and the path resurrects as scaffolding
-  for them (Linux overlayfs opaque-dir + upper-entry semantics). Worked
-  example: whiteout `/out` at t2, B writes `/out/f` at t3, C writes
-  `/out/g` at t4 → merged `/out` contains only `{f, g}`; had the
-  whiteout been last, `/out` would be deleted entirely.
-- **Scaffolding never resurrects**: an ensured-parent directory entry
-  folds silently and can never override a whiteout by itself; only a
-  content-bearing entry can.
-- **Apply order is fixed**: deletions first (deepest path first), then
-  writes with ensured parents — one deterministic final state.
-- **Type conflicts** (fork A writes file `/p`; fork B creates
-  `/p/sub/...`): the winner's node type decides. Directory wins → A's
-  file entry is dropped; file wins → B's entries under `/p` are dropped.
-- **Scaffolding directories** (ensured-parent entries emitted by
-  `diff()`): they lose to a *whiteout* at their own path regardless of
-  time (an ensured parent can never outvote a deletion), but compete
-  normally otherwise — a later scaffolding dir can beat an earlier
-  file, which is how type conflicts resolve coherently.
-- **`metadataOnly` entries** (chmod/utimes metacopy): contribute
-  metadata, never discard content. When a metadataOnly entry is latest
-  at its path and an earlier content write exists, the merged entry
-  keeps the content and takes the metadataOnly entry's mode/mtime (and
-  ordering stamp).
+The contract this produces (the promised behavior, pinned by
+`src/fs/vfs-template.merge.test.ts`):
+
+1. **Ordering**: entries apply in (`changedAt`, input order); the
+   latest accepted entry per path wins.
+2. **Deletion semantics**: a deletion removes the subtree as of its
+   stamp; strictly-later content resurrects as ordinary creation
+   (the tree's `resurrectDir`, emitting per-child whiteouts for stale
+   lower content with the deleting fork's stamp).
+3. **Structural invariants on output**: no children under
+   files/symlinks; no nested deletions.
+4. **metadataOnly**: on an existing node it updates mode/mtime in
+   place; on a lower file it becomes a metacopy shadow (apply resolves
+   it); on a deleted/missing path it is skipped (ENOENT).
+5. **Disjoint unions merge cleanly**, any number of sources.
+6. **Determinism**: identical input produces byte-identical output.
+7. **Completion**: never throws, never hangs, on adversarial input.
+8. **Containment**: a conflicting (racy) entry changes the output only
+   within its own subtree.
+
+Conflict handling is deliberately the *simplest possible thing*:
+whatever the stock filesystem refuses, the replay skips. A file write
+over another fork's directory is EISDIR — skipped, anomaly contained
+to that path, and the structural invariants hold trivially. We do not
+invent conflict-resolution rules real filesystems don't have; racy
+input is the user's fault, and the merge owes determinism and
+containment, not arbitration. (An earlier iteration implemented
+last-touch-wins type replacement, scaffolding-vs-whiteout rules, and
+whiteout subtree suppression by hand on flat path lists — it grew a
+critical sibling-key bug (`/x/a-b` sorts between `/x/a` and `/x/a/b`)
+and was replaced by this replay, which gets the same outcomes from
+the stock operations' own semantics.)
+
+**Stamps**: after each replayed operation, the touched node's
+`changedAt` is set to the replayed entry's own stamp (ancestors and
+resurrection whiteouts minted by the op take it too). The sort is the
+single source of ordering truth — wall clocks never leak into merged
+output, and the stamps stay in the inputs' space so merged diffs can
+be merged again.
 
 ## Apply semantics
 
@@ -209,19 +233,24 @@ const a = tpl.fork();   // MountableFs: shared scratch + fresh overlay per mount
 const b = tpl.fork();
 await Promise.all([run(a), run(b)]);
 
-const merged = tpl.merge([a, b]);   // real-absolute diff, changedAt order
-tpl.apply(merged);                  // validate + write to roots
+const merged = await tpl.merge([a, b]);   // a fresh fork: the replay target
+tpl.apply(merged.diff({ space: "host" })); // validate + write to roots
 ```
 
-Free functions for harnesses managing their own mounts:
-`mergeDiffs(diffs, opts?)`, `applyDiffToRealFs(diff)`.
+`merge` accepts fork instances and/or plain diffs (e.g. serialized
+across a process boundary) and returns the merged fork — diff it and
+discard it, or keep working on it. `applyDiffToRealFs(diff)` remains
+the standalone host-apply primitive for harnesses managing their own
+mounts. There is no standalone `mergeDiffs`: merging is defined only
+against a template's lower.
 
 ## Implementation pieces (3.7.0)
 
 1. `changedAt` stamps on diff entries (OverlayTree/diff plumbing; writes
    and whiteouts).
-2. `mergeDiffs(diffs, opts?)` — ordering, whiteout/type/scaffolding/
-   metadata folding.
+2. Template `merge` as fork-replay — ordering, stock-op replay,
+   per-op restamping; `MountableFs.diff({ space })` for the two path
+   spaces; `OverlayFs.restamp` as the reconciliation primitive.
 3. `applyDiffToRealFs(diff)` — standalone wrapper over
    `src/fs/overlay-fs/apply.ts` (no drop; caller owns overlay lifecycle).
 4. `createVfsTemplate({ mounts })` + `fork()`/`merge()`/`apply()`.

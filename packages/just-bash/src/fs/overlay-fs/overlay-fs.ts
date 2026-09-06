@@ -194,6 +194,71 @@ export class OverlayFs implements IFileSystem {
   private readonly tree: OverlayTree;
   private nextMemoryIdentity = 1;
 
+  /** The real directory this overlay reads through and diffs against. */
+  get rootDir(): string {
+    return this.root;
+  }
+
+  /**
+   * Reconciliation support (template merge replay, host-side change-set
+   * application): stamp the node at `path` with `changedAt` (the
+   * replayed entry's own stamp), and correct any NEWER stamps among its
+   * ancestors and descendants. Post-sort, a newer stamp can only be a
+   * fresh wall-clock stamp minted by the replay op itself (ensured
+   * parents, resurrection whiteouts) — those belong to the replayed
+   * entry and take its stamp; earlier replayed entries (older stamps)
+   * are never touched. This is a host-side reconciliation API, not a
+   * guest operation: changedAt is the ordering key merges rely on.
+   */
+  restamp(path: string, changedAt: number): void {
+    const normalized = normalizePath(path);
+    const stamp = (p: string): void => {
+      const r = this.tree.descend(p);
+      if (r.kind === "found") {
+        (r.node as { changedAt?: number }).changedAt = changedAt;
+      }
+    };
+    const soften = (p: string): void => {
+      const r = this.tree.descend(p);
+      if (r.kind === "found") {
+        const node = r.node as { changedAt?: number; mtime?: Date };
+        if ((node.changedAt ?? 0) > changedAt) {
+          node.changedAt = changedAt;
+          // A softened node was minted by THIS replay op (ensured
+          // parent, resurrection whiteout): its mtime is wall-clock
+          // and would leak into merged output — normalize to the
+          // entry's stamp (explicit entries keep their own mtime,
+          // applied via utimes during replay).
+          node.mtime = new Date(changedAt);
+        }
+      }
+    };
+    // The op's own node takes the entry stamp unconditionally (a chmod
+    // bumps the stamp; a fresh attach carries it).
+    stamp(normalized);
+    // Ancestors: only fresh (newer) stamps belong to this op.
+    let current = normalized;
+    for (;;) {
+      const slash = current.lastIndexOf("/");
+      if (slash <= 0) break;
+      current = current.slice(0, slash);
+      soften(current);
+    }
+    // Descendants: resurrection whiteouts minted by a mkdir-over-
+    // whiteout belong to the replayed entry.
+    const walk = (p: string): void => {
+      const r = this.tree.descend(p);
+      if (r.kind !== "found" || r.node.type !== "directory") return;
+      for (const [name, child] of (r.node as { children: Map<string, unknown> })
+        .children) {
+        const childPath = `${p === "/" ? "" : p}/${name}`;
+        soften(childPath);
+        walk(childPath);
+      }
+    };
+    walk(normalized);
+  }
+
   private identityFor(entry: OverlayEntryNode): string {
     if (entry.type === "symlink") return "";
     if (!entry.identity) {

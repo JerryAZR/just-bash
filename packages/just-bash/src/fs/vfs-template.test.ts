@@ -49,12 +49,14 @@ describe("createVfsTemplate", () => {
     await b.writeFile("/project/app.ts", "from-b");
     await b.writeFile("/home/user/notes.txt", "home-b");
 
-    const merged = tpl.merge([a, b]);
-    const appEntry = merged.writes.find((w) => w.path.endsWith("app.ts"));
+    const merged = (await tpl.merge([a, b])).diff({ space: "vfs" });
+    const appEntry = merged.writes.find((w) => w.path === "/project/app.ts");
     expect(new TextDecoder().decode(appEntry?.content)).toBe("from-b");
-    expect(merged.writes.some((w) => w.path.endsWith("notes.txt"))).toBe(true);
-    // All paths are real absolute.
-    for (const w of merged.writes) expect(path.isAbsolute(w.path)).toBe(true);
+    expect(merged.writes.some((w) => w.path === "/home/user/notes.txt")).toBe(
+      true,
+    );
+    // vfs space: full virtual paths, mount prefix retained.
+    for (const w of merged.writes) expect(w.path.startsWith("/")).toBe(true);
   });
 
   it("applies the merged diff to the real roots and re-baselines", async () => {
@@ -63,7 +65,7 @@ describe("createVfsTemplate", () => {
     const b = tpl.fork();
     await a.writeFile("/project/new.ts", "new-file");
     await b.rm("/project/app.ts");
-    tpl.apply(tpl.merge([a, b]));
+    tpl.apply((await tpl.merge([a, b])).diff({ space: "host" }));
 
     expect(fs.readFileSync(path.join(projectRoot, "new.ts"), "utf8")).toBe(
       "new-file",
@@ -80,13 +82,15 @@ describe("createVfsTemplate", () => {
     const tpl = makeTemplate();
     const results = await Promise.all(
       ["one", "two", "three"].map(async (name) => {
-        const bash = new Bash({ fs: tpl.fork(), cwd: "/project" });
+        const fork = tpl.fork();
+        const bash = new Bash({ fs: fork, cwd: "/project" });
         await bash.exec(`echo "${name}" > ${name}.txt`);
         await bash.exec(`echo "shared-${name}" >> /tmp/log.txt`);
+        return fork;
       }),
     );
     expect(results).toHaveLength(3);
-    tpl.apply(tpl.merge());
+    tpl.apply((await tpl.merge(results)).diff({ space: "host" }));
     for (const name of ["one", "two", "three"]) {
       expect(
         fs.readFileSync(path.join(projectRoot, `${name}.txt`), "utf8"),
@@ -113,14 +117,6 @@ describe("createVfsTemplate", () => {
         deletions: [],
       }),
     ).toThrow(/outside every template root/);
-  });
-
-  it("merge rejects a filesystem the template did not fork", () => {
-    const tpl = makeTemplate();
-    const foreign = tpl.fork();
-    tpl.apply(tpl.merge());
-    // `foreign` was consumed by apply; merging it now fails loudly.
-    expect(() => tpl.merge([foreign])).toThrow(/did not fork/);
   });
 
   function file(path: string, content: string) {
@@ -179,33 +175,4 @@ describe("symlink containment at apply", () => {
       }
     },
   );
-});
-
-describe("merge ordering", () => {
-  it("merges unlisted forks after listed ones", async () => {
-    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-ord-"));
-    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-ord-h-"));
-    try {
-      fs.writeFileSync(path.join(projectRoot, "app.ts"), "v0\n");
-      const tpl = createVfsTemplate({
-        mounts: [
-          { at: "/project", root: projectRoot },
-          { at: "/home/user", root: homeRoot },
-        ],
-      });
-      const a = tpl.fork();
-      const b = tpl.fork();
-      await a.writeFile("/project/app.ts", "from-a");
-      await new Promise((r) => setTimeout(r, 5));
-      await b.writeFile("/project/app.ts", "from-b");
-      // List only b; a merges after it. changedAt decides (b is newer),
-      // independent of list position.
-      const merged = tpl.merge([b]);
-      const entry = merged.writes.find((w) => w.path.endsWith("app.ts"));
-      expect(new TextDecoder().decode(entry?.content)).toBe("from-b");
-    } finally {
-      fs.rmSync(projectRoot, { recursive: true, force: true, maxRetries: 3 });
-      fs.rmSync(homeRoot, { recursive: true, force: true, maxRetries: 3 });
-    }
-  });
 });

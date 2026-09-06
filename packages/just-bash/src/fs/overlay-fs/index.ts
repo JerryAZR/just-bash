@@ -1,5 +1,4 @@
 export { applyDiffToRealFs } from "./apply.js";
-export { mergeDiffs } from "./merge.js";
 export {
   type OverlayDiff,
   OverlayFs,
