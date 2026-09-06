@@ -1,11 +1,13 @@
 # VFS Template & the Fork Model: Design Decisions
 
-Status: **design for review** — documents the planned "template + fork"
-API for running parallel agent tool calls against shared project roots.
-Read alongside `docs/design/overlay-tree.md` (the per-overlay upper
-layer) and `docs/recipes/agent-sandbox-integration.md` (the long-lived,
-per-turn sandbox model). Implementation lands in 3.7.0; this file is the
-reference when modifying it.
+Status: **implemented** (3.7.0, unreleased) — documents the "template
++ fork" API for running parallel agent tool calls against shared
+project roots. Pieces: `changedAt` stamps (257ce4a), `mergeDiffs`
+(1926c93), `applyDiffToRealFs` (a2fc1cd), `createVfsTemplate`
+(22ea4f3), generic oversized-result assembly (444ebf9), recipe
+(975b544). Read alongside `docs/design/overlay-tree.md` (the
+per-overlay upper layer) and `docs/recipes/agent-sandbox-integration.md`
+(the long-lived, per-turn sandbox model).
 
 ## Problem
 
