@@ -196,3 +196,30 @@ describe("createAgentSandbox", () => {
     ).not.toBe(0);
   });
 });
+
+describe("path conversion boundary cases", () => {
+  it("rejects prefix-colliding paths on both directions", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "sb-b-home-"));
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "sb-b-project-"));
+    try {
+      const sandbox = createAgentSandbox({
+        home: homeDir,
+        project: projectDir,
+      });
+      // A sibling sharing the root's string prefix must NOT match.
+      expect(
+        sandbox.resolveRealPath(`${projectDir}-evil${path.sep}f.txt`),
+      ).toBeNull();
+      expect(sandbox.toRealPath("/project-evil/f.txt")).toBeNull();
+      // The root itself resolves to the overlay root.
+      expect(sandbox.resolveRealPath(projectDir)?.path).toBe("/");
+      // Nested mount: a path under home resolves to the home overlay.
+      expect(
+        sandbox.resolveRealPath(path.join(homeDir, ".zshrc"))?.mountPoint,
+      ).toBe("/home/user");
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true, maxRetries: 3 });
+      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});

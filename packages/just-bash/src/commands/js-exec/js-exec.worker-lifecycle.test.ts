@@ -40,5 +40,9 @@ describe("js-exec worker idle teardown", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await env.exec(`js-exec -c "console.log('b')"`);
     expect(_hasSharedJsExecWorkerForTests()).toBe(true);
+    // Wait past the ORIGINAL 300ms deadline: if exec 'b' did not re-arm
+    // the teardown timer, the worker dies here. It must still be alive.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(_hasSharedJsExecWorkerForTests()).toBe(true);
   }, 15_000);
 });

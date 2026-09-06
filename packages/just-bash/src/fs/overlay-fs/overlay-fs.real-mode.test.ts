@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -28,23 +34,25 @@ describe("real-dir mode normalization (win32)", () => {
     "reports 0o755 permission bits for real-backed directories",
     async () => {
       const fs = new OverlayFs({ root: makeRoot(), mountPoint: "/" });
-      for (const p of ["/sub"]) {
-        const st = await fs.stat(p);
-        expect(st.isDirectory).toBe(true);
-        expect(st.mode & 0o777).toBe(0o755);
-        const lst = await fs.lstat(p);
-        expect(lst.mode & 0o777).toBe(0o755);
-      }
+      const st = await fs.stat("/sub");
+      expect(st.isDirectory).toBe(true);
+      expect(st.mode & 0o777).toBe(0o755);
+      const lst = await fs.lstat("/sub");
+      expect(lst.mode & 0o777).toBe(0o755);
     },
   );
 
   it.skipIf(process.platform !== "win32")(
     "leaves real file modes as reported",
     async () => {
-      const fs = new OverlayFs({ root: makeRoot(), mountPoint: "/" });
+      const root = makeRoot();
+      const fs = new OverlayFs({ root, mountPoint: "/" });
       const st = await fs.stat("/sub/f.txt");
       expect(st.isFile).toBe(true);
-      expect(st.mode & 0o40000).toBe(0); // not mislabeled a directory
+      // Files are NOT normalized: the overlay reports exactly what the
+      // real lstat reported.
+      const raw = lstatSync(path.join(root, "sub", "f.txt")).mode;
+      expect(st.mode).toBe(raw);
     },
   );
 

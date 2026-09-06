@@ -116,7 +116,9 @@ alternatives:
   order produces wrong merges.
 
 `changedAt` is utimes-proof, tie-light (ms-granular plus the input-order
-tiebreak), and needs no caller cooperation.
+tiebreak), and needs no caller cooperation. **Input array order is the
+tiebreak mechanism** — callers that track causality pass diffs in
+completion order; there is no separate ordering option.
 
 **Simplicity is a hard requirement.** Conflicts are user mistakes (racy
 input); we do not pay for a convoluted algorithm on their behalf. The
@@ -125,6 +127,11 @@ to be intricate rather than mechanically simple, they will be
 *simplified* (e.g. flat per-path latest-wins, directory whiteouts
 suppressing earlier subtree entries, no type-folding cleverness) rather
 than shipped as something subtle.
+
+**Coverage note.** `READDIR` results are oversized-transparent by
+construction (the generic assembly is op-agnostic — the three tested
+channels prove the loop); no dedicated multi-hundred-thousand-entry
+test exists for it.
 
 ## Merge semantics (last-touch-wins, precisely)
 
@@ -150,11 +157,15 @@ order); the winner takes the path wholesale:
   `/p/sub/...`): the winner's node type decides. Directory wins → A's
   file entry is dropped; file wins → B's entries under `/p` are dropped.
 - **Scaffolding directories** (ensured-parent entries emitted by
-  `diff()`): fold silently; a scaffolding entry never overrides a
-  content-bearing or deletion entry.
-- **`metadataOnly` entries** (chmod/utimes metacopy): merge as metadata.
-  If a content write for the same path wins, the winner's `mode`/`mtime`
-  absorb it.
+  `diff()`): they lose to a *whiteout* at their own path regardless of
+  time (an ensured parent can never outvote a deletion), but compete
+  normally otherwise — a later scaffolding dir can beat an earlier
+  file, which is how type conflicts resolve coherently.
+- **`metadataOnly` entries** (chmod/utimes metacopy): contribute
+  metadata, never discard content. When a metadataOnly entry is latest
+  at its path and an earlier content write exists, the merged entry
+  keeps the content and takes the metadataOnly entry's mode/mtime (and
+  ordering stamp).
 
 ## Apply semantics
 

@@ -92,6 +92,12 @@ describe("createVfsTemplate", () => {
         fs.readFileSync(path.join(projectRoot, `${name}.txt`), "utf8"),
       ).toBe(`${name}\n`);
     }
+    // The /tmp contract: shared scratch saw every fork's appends, and
+    // all three survive (InMemoryFs appends are atomic).
+    const fresh = tpl.fork();
+    expect(await fresh.readFile("/tmp/log.txt")).toBe(
+      "shared-one\nshared-two\nshared-three\n",
+    );
   });
 
   it("apply rejects entries outside every registered root", () => {
@@ -121,4 +127,80 @@ describe("createVfsTemplate", () => {
       mtime: new Date(0),
     };
   }
+});
+
+describe("mount validation", () => {
+  it("rejects duplicate mount points at construction", () => {
+    expect(() =>
+      createVfsTemplate({
+        mounts: [
+          { at: "/project", root: "/" },
+          { at: "project/", root: "/" },
+        ],
+      }),
+    ).toThrow(/duplicate mount point/);
+  });
+});
+
+describe("symlink containment at apply", () => {
+  it.skipIf(process.platform === "win32")(
+    "rejects entries that escape their root through a symlink",
+    () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-link-"));
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-out-"));
+      try {
+        fs.symlinkSync(outside, path.join(root, "link"), "dir");
+        const tpl = createVfsTemplate({
+          mounts: [{ at: "/project", root }],
+        });
+        expect(() =>
+          tpl.apply({
+            writes: [
+              {
+                path: path.join(root, "link", "escape.txt"),
+                nodeType: "file" as const,
+                content: new TextEncoder().encode("x"),
+                mode: 0o644,
+                mtime: new Date(0),
+              },
+            ],
+            deletions: [],
+          }),
+        ).toThrow(/escapes its root through a symlink/);
+        expect(fs.existsSync(path.join(outside, "escape.txt"))).toBe(false);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+        fs.rmSync(outside, { recursive: true, force: true, maxRetries: 3 });
+      }
+    },
+  );
+});
+
+describe("merge ordering", () => {
+  it("merges unlisted forks after listed ones", async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-ord-"));
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-ord-h-"));
+    try {
+      fs.writeFileSync(path.join(projectRoot, "app.ts"), "v0\n");
+      const tpl = createVfsTemplate({
+        mounts: [
+          { at: "/project", root: projectRoot },
+          { at: "/home/user", root: homeRoot },
+        ],
+      });
+      const a = tpl.fork();
+      const b = tpl.fork();
+      await a.writeFile("/project/app.ts", "from-a");
+      await new Promise((r) => setTimeout(r, 5));
+      await b.writeFile("/project/app.ts", "from-b");
+      // List only b; a merges after it. changedAt decides (b is newer),
+      // independent of list position.
+      const merged = tpl.merge([b]);
+      const entry = merged.writes.find((w) => w.path.endsWith("app.ts"));
+      expect(new TextDecoder().decode(entry?.content)).toBe("from-b");
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true, maxRetries: 3 });
+      fs.rmSync(homeRoot, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
 });

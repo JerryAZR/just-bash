@@ -56,3 +56,26 @@ describe("appendFile concurrency", () => {
     expect(content).toContain("y\n");
   });
 });
+
+describe("appendFile metacopy race", () => {
+  it("two concurrent first-appends to a chmod-shadowed file both survive", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "append-meta-"));
+    try {
+      fs.writeFileSync(path.join(root, "m.txt"), "base\n");
+      const vfs = new OverlayFs({ root, mountPoint: "/" });
+      // chmod creates a metacopy shadow (metadata upper, data lower).
+      await vfs.chmod("/m.txt", 0o600);
+      await Promise.all([
+        vfs.appendFile("/m.txt", "a\n"),
+        vfs.appendFile("/m.txt", "b\n"),
+      ]);
+      const content = await vfs.readFile("/m.txt");
+      expect(content.startsWith("base\n")).toBe(true);
+      expect(content).toContain("a\n");
+      expect(content).toContain("b\n");
+      expect(content.length).toBe("base\na\nb\n".length);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});

@@ -4,19 +4,28 @@ import { InMemoryFs } from "../../fs/in-memory-fs/index.js";
 
 // The bridge protocol's data buffer is 8MB; files larger than that are
 // now read and written in ranged chunks, transparent to the guest.
+// Payloads are position-dependent so chunk misassembly is detectable.
 const NINE_MB = 9_000_000;
+const pattern = (n: number) =>
+  Array.from({ length: n }, (_, i) => String.fromCharCode(65 + (i % 26))).join(
+    "",
+  );
 
 describe("python3 large file I/O (> 8MB bridge buffer)", () => {
-  it("reads a pre-existing 9MB file", async () => {
+  it("reads a pre-existing 9MB file with exact assembly", async () => {
     const env = new Bash({
       python: true,
-      files: { "/big.bin": "A".repeat(NINE_MB) },
+      files: { "/big.bin": pattern(NINE_MB) },
     });
     const result = await env.exec(
-      `python3 -c "data = open('/big.bin', 'rb').read(); print(len(data), data[0:1], data[-1:])"`,
+      `python3 -c "
+data = open('/big.bin', 'rb').read()
+expected = (''.join(chr(65 + (i % 26)) for i in range(len(data)))).encode()
+print(len(data), data == expected)
+"`,
     );
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`${NINE_MB} b'A' b'A'\n`);
+    expect(result.stdout).toBe(`${NINE_MB} True\n`);
     expect(result.exitCode).toBe(0);
   }, 60_000);
 
@@ -24,7 +33,7 @@ describe("python3 large file I/O (> 8MB bridge buffer)", () => {
     const env = new Bash({ python: true });
     const result = await env.exec(
       `python3 -c "
-data = b'B' * ${NINE_MB}
+data = (''.join(chr(65 + (i % 26)) for i in range(${NINE_MB}))).encode()
 open('/out.bin', 'wb').write(data)
 back = open('/out.bin', 'rb').read()
 print(len(back), back == data)
@@ -111,6 +120,26 @@ except OSError as e:
     );
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe("PermissionError\n");
+    expect(result.exitCode).toBe(0);
+  }, 60_000);
+});
+
+describe("errno honesty for rmdir on non-empty directories", () => {
+  it("reports ENOTEMPTY, not EIO", async () => {
+    const env = new Bash({ python: true, files: { "/data/f.txt": "x" } });
+    const result = await env.exec(
+      `python3 -c "
+import os
+try:
+    os.rmdir('/data')
+    print('NO ERROR')
+except OSError as e:
+    print('OSError', 'not empty' in str(e).lower(), e.errno == 5)
+"`,
+    );
+    expect(result.stderr).toBe("");
+    // Must say "not empty"; must NOT be the EIO(5) fallback.
+    expect(result.stdout).toBe("OSError True False\n");
     expect(result.exitCode).toBe(0);
   }, 60_000);
 });

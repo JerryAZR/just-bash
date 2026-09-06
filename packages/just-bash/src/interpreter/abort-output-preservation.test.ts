@@ -51,6 +51,6 @@ describe("abort/timeout output preservation", () => {
       "echo one; echo two; echo three; echo four; echo five; echo six",
     );
     expect(result.exitCode).toBe(126);
-    expect(result.stdout).toContain("one\n");
+    expect(result.stdout).toBe("one\ntwo\nthree\nfour\nfive\n");
   });
 });

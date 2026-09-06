@@ -60,7 +60,7 @@ describe("applyDiffToRealFs", () => {
     expect(fs.readFileSync(p("out/f.txt"), "utf8")).toBe("new");
   });
 
-  it("handles deep subtrees in deletion order without crashing", () => {
+  it("handles nested deletions without crashing", () => {
     fs.mkdirSync(p("x/y/z"), { recursive: true });
     fs.writeFileSync(p("x/y/z/f.txt"), "f");
     applyDiffToRealFs({
@@ -90,4 +90,88 @@ describe("applyDiffToRealFs", () => {
     expect(fs.statSync(p("d/sub")).isDirectory()).toBe(true);
     expect(fs.readFileSync(p("d/sub/f.txt"), "utf8")).toBe("x");
   });
+});
+
+describe("directory metadata at apply", () => {
+  it("applies mode and mtime to directory entries", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-dir-meta-"));
+    try {
+      const target = path.join(root, "docs");
+      const when = new Date("2002-03-04T05:06:07Z");
+      applyDiffToRealFs({
+        writes: [
+          {
+            path: target,
+            nodeType: "directory",
+            content: new Uint8Array(0),
+            mode: 0o700,
+            mtime: when,
+          },
+        ],
+        deletions: [],
+      });
+      if (process.platform !== "win32") {
+        expect(fs.statSync(target).mode & 0o777).toBe(0o700);
+      }
+      expect(fs.statSync(target).mtime).toEqual(when);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});
+
+describe("path normalization guard", () => {
+  it("rejects non-normalized paths (.. escapes) loudly", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-norm-"));
+    try {
+      expect(() =>
+        applyDiffToRealFs({
+          writes: [
+            {
+              path: `${root}/../escape.txt`,
+              nodeType: "file",
+              content: new TextEncoder().encode("x"),
+              mode: 0o644,
+              mtime: new Date(0),
+            },
+          ],
+          deletions: [],
+        }),
+      ).toThrow(/not normalized/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});
+
+describe("symlink application", () => {
+  it.skipIf(process.platform === "win32")(
+    "recreates symlinks from the change set",
+    () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-link-"));
+      try {
+        fs.writeFileSync(path.join(root, "real.txt"), "content");
+        applyDiffToRealFs({
+          writes: [
+            {
+              path: path.join(root, "link.txt"),
+              nodeType: "symlink",
+              content: new TextEncoder().encode("real.txt"),
+              mode: 0o777,
+              mtime: new Date(0),
+            },
+          ],
+          deletions: [],
+        });
+        expect(fs.readlinkSync(path.join(root, "link.txt"))).toBe(
+          "real.txt",
+        );
+        expect(fs.readFileSync(path.join(root, "link.txt"), "utf8")).toBe(
+          "content",
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+      }
+    },
+  );
 });

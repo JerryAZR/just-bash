@@ -166,7 +166,7 @@ describe("rm -f with mount points (GNU parity: force suppresses only ENOENT)", (
     const result = await env.exec("rm -rf /mnt/data");
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("/mnt/data");
-    expect(result.stderr).not.toBe("");
+    expect(result.stderr).toMatch(/EBUSY|busy/);
     // Nothing was removed.
     const check = await env.exec("cat /mnt/data/file.txt");
     expect(check.stdout).toBe("x\n");
@@ -186,5 +186,27 @@ describe("rm -f with mount points (GNU parity: force suppresses only ENOENT)", (
     const result = await env.exec("rm -f /definitely-not-there.txt");
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
+  });
+});
+
+describe("rm -f ENOENT anchoring (filenames containing error text)", () => {
+  it("does not swallow EACCES for a file named ENOENT-notes", async () => {
+    const env = new Bash({
+      files: { "/ENOENT-notes": "x" },
+      commands: undefined,
+    });
+    // Simulate a permission failure on a path containing "ENOENT":
+    // MountableFs mount points produce EBUSY, which embeds the path.
+    const { MountableFs } = await import(
+      "../../fs/mountable-fs/mountable-fs.js"
+    );
+    const { InMemoryFs } = await import("../../fs/in-memory-fs/index.js");
+    const vfs = new MountableFs({ base: new InMemoryFs() });
+    vfs.mount("/mnt/ENOENT-notes", new InMemoryFs());
+    const env2 = new Bash({ fs: vfs, cwd: "/" });
+    const result = await env2.exec("rm -rf /mnt/ENOENT-notes");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).not.toBe("");
+    expect(env).toBeDefined();
   });
 });
