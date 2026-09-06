@@ -83,6 +83,7 @@ export {
   type MountConfig,
 } from "./fs/mountable-fs/index.js";
 export {
+  mergeDiffs,
   type OverlayDiff,
   OverlayFs,
   type OverlayFsOptions,

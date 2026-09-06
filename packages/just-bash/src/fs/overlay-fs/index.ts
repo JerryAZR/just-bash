@@ -1,3 +1,4 @@
+export { mergeDiffs } from "./merge.js";
 export {
   type OverlayDiff,
   OverlayFs,

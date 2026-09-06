@@ -49,7 +49,9 @@ describe("diff() changedAt stamps", () => {
     const writes = overlay.diff().writes;
     const a = writes.find((w) => w.path === "/a.txt");
     const b = writes.find((w) => w.path === "/b.txt");
-    expect(b.changedAt).toBeGreaterThan(a.changedAt);
+    expect(a?.changedAt).toBeDefined();
+    expect(b?.changedAt).toBeDefined();
+    expect(b?.changedAt ?? 0).toBeGreaterThan(a?.changedAt ?? 0);
   });
 
   it("utimes updates changedAt (it is a mutation) but never moves mtime's clock", async () => {
@@ -65,7 +67,9 @@ describe("diff() changedAt stamps", () => {
     expect(metacopy.mtime).toEqual(ancient);
     // ...but changedAt advanced: a merge orders this entry AFTER the
     // original write, which is what actually happened.
-    expect(metacopy.changedAt).toBeGreaterThan(firstWrite.changedAt);
+    expect(metacopy.changedAt ?? 0).toBeGreaterThan(
+      firstWrite.changedAt ?? 0,
+    );
     // An utimes on an upper-layer file updates it in place (metacopy
     // shadows are only for lower files), so this stays a full write.
     expect(metacopy.content.length).toBeGreaterThan(0);
