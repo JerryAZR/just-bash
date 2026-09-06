@@ -177,9 +177,22 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   };
 
   const apply = (merged: OverlayDiff): void => {
+    // Host-space diffs may carry mixed separators (MountableFs joins
+    // with "/" to stay browser-safe); normalize the whole diff up
+    // front — applyDiffToRealFs rejects non-normalized paths.
+    const normalized: OverlayDiff = {
+      writes: merged.writes.map((w) => ({
+        ...w,
+        path: nodePath.normalize(w.path),
+      })),
+      deletions: merged.deletions.map((d) => nodePath.normalize(d)),
+      ...(merged.deletionChangedAt && {
+        deletionChangedAt: merged.deletionChangedAt,
+      }),
+    };
     for (const target of [
-      ...merged.deletions,
-      ...merged.writes.map((w) => w.path),
+      ...normalized.deletions,
+      ...normalized.writes.map((w) => w.path),
     ]) {
       const inside = mounts.some(
         ({ root }) => target === root || target.startsWith(root + nodePath.sep),
@@ -208,7 +221,7 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
         );
       }
     }
-    applyDiffToRealFs(merged);
+    applyDiffToRealFs(normalized);
   };
 
   return { fork, merge, apply };

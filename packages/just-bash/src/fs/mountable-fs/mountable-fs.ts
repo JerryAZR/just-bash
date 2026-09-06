@@ -164,7 +164,10 @@ export class MountableFs implements IFileSystem {
             `cannot produce a host-space diff: mount at '${entry.mountPoint}' has no real root`,
           );
         }
-        return nodePath.join(fs.rootDir, rel);
+        // rootDir has no trailing slash and rel starts with "/" — plain
+        // concat keeps this module browser-safe (no node:path import).
+        // node fs accepts the forward slashes in rel on every platform.
+        return `${fs.rootDir}${rel}`;
       };
       for (const w of raw.writes) {
         writes.push({ ...w, path: map(w.path) });
