@@ -264,6 +264,21 @@ describe("grep", () => {
     expect(result.stderr).toBe("grep: /dir: Is a directory\n");
   });
 
+  it("should exit 2 for a missing file whose name contains 'Is a directory'", async () => {
+    // The "is a directory" classification must travel as structured data,
+    // not be sniffed from the message text: a file NAME smuggling the
+    // substring into an unrelated error must still count as an error.
+    const env = new Bash({
+      files: { "/real.txt": "nothing here\n" },
+    });
+    const result = await env.exec('grep pattern "/real.txt Is a directory"');
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "grep: /real.txt Is a directory: No such file or directory\n",
+    );
+    expect(result.exitCode).toBe(2);
+  });
+
   it("should count zero matches correctly with -c", async () => {
     const env = new Bash({
       files: { "/test.txt": "no match here\n" },

@@ -191,6 +191,10 @@ export class AgentSandbox {
         .relative(found.root, realPath)
         .split(nodePath.sep)
         .join("/")}`;
+      // The mount root itself maps to "/", which is never a pending
+      // upper entry — diff() and sync() both skip it and drop() rejects
+      // it with EINVAL — so there is nothing to drop for it.
+      if (rel === "/") return;
       const list = applied.get(found.fs);
       if (list) list.push(rel);
       else applied.set(found.fs, [rel]);

@@ -151,6 +151,46 @@ describe("ranged bridge ops", () => {
     }
   });
 
+  it("range read exactly at the retained result's end fails fast", async () => {
+    const shared = createSharedBuffer();
+    const protocol = new ProtocolBuffer(shared);
+    const fs = new InMemoryFs();
+    await fs.writeFile("/data.bin", new Uint8Array(10).fill(65));
+    const handler = new BridgeHandler(shared, fs, "/", "test-cmd");
+    const run = handler.run(10_000);
+    try {
+      // Publish a retained result (10 bytes).
+      const read = await sendOp(protocol, OpCode.READ_FILE, {
+        path: "/data.bin",
+      });
+      expect(read.status).toBe(ResultState.SUCCESS);
+      expect(read.result.length).toBe(10);
+
+      // A valid in-range slice still succeeds.
+      const ok = await sendOp(protocol, OpCode.READ_RESULT_RANGE, {
+        flags: 4,
+        mode: 6,
+      });
+      expect(ok.status).toBe(ResultState.SUCCESS);
+      expect(ok.result.length).toBe(6);
+
+      // offset === retained.length must NOT return an empty success: an
+      // assembling reader could only treat that as corruption.
+      const atEnd = await sendOp(protocol, OpCode.READ_RESULT_RANGE, {
+        flags: 10,
+        mode: 10,
+      });
+      expect(atEnd.status).toBe(ResultState.ERROR);
+      expect(protocol.getErrorCode()).toBe(ErrorCode.IO_ERROR);
+      expect(protocol.getResultAsString()).toBe(
+        "No retained result for range read (offset=10, length=10, retained=10)",
+      );
+    } finally {
+      handler.stop();
+      await run;
+    }
+  });
+
   it("range read past the retained result fails with range details", async () => {
     const shared = createSharedBuffer();
     const protocol = new ProtocolBuffer(shared);

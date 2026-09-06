@@ -175,6 +175,31 @@ describe("createAgentSandbox", () => {
     expect(fs.existsSync(path.join(projectDir, "two.txt"))).toBe(false);
   });
 
+  it("applies a change-set entry targeting the mount root without a bogus drop", async () => {
+    const sandbox = createAgentSandbox({ project: projectDir });
+    // Hand-built change set (the API explicitly supports those): a
+    // directory write AT the mounted root itself. The apply is a
+    // mkdir -p no-op on disk; the incremental drop must not try to drop
+    // the root-relative "/" path — drop() rejects it with EINVAL, which
+    // would falsely fail the whole apply (and mask any real apply error).
+    await expect(
+      sandbox.applyChanges({
+        writes: [
+          {
+            path: projectDir,
+            nodeType: "directory",
+            content: new Uint8Array(0),
+            mode: 0o755,
+            mtime: new Date(),
+          },
+        ],
+        deletions: [],
+      }),
+    ).resolves.toBeUndefined();
+    // The root was never a pending overlay entry; nothing to drop.
+    expect(sandbox.diff()).toEqual({ writes: [], deletions: [] });
+  });
+
   it("applies metadataOnly writes without touching content", async () => {
     if (process.platform === "win32") return;
     const sandbox = createAgentSandbox({ project: projectDir });

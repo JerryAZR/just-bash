@@ -689,7 +689,12 @@ export const grepCommand: RuntimeCommand = {
 
               if (isDirectory) {
                 if (!recursive) {
-                  return { error: `grep: ${file}: Is a directory\n` };
+                  // isDirectory rides along as DATA so the exit-status
+                  // decision below never has to re-parse the message text.
+                  return {
+                    error: `grep: ${file}: Is a directory\n`,
+                    isDirectory: true,
+                  };
                 }
                 return null;
               }
@@ -741,7 +746,10 @@ export const grepCommand: RuntimeCommand = {
             return { file, result };
           } catch (error) {
             rethrowFatalExecutionError(error);
-            return { error: `grep: ${file}: No such file or directory\n` };
+            return {
+              error: `grep: ${file}: No such file or directory\n`,
+              isDirectory: false,
+            };
           }
         }),
       );
@@ -752,7 +760,10 @@ export const grepCommand: RuntimeCommand = {
 
         if ("error" in res && res.error) {
           stderr += res.error;
-          if (!res.error.includes("Is a directory")) {
+          // Classification comes from the structured flag, not from
+          // sniffing the message: a *file name* containing the substring
+          // "Is a directory" must not demote a real error to exit 1.
+          if (!res.isDirectory) {
             anyError = true;
           }
           continue;

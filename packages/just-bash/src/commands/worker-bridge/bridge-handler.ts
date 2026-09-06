@@ -293,7 +293,12 @@ export class BridgeHandler {
     const offset = this.protocol.getFlags();
     const length = this.protocol.getMode();
     const retained = this.lastResult;
-    if (!retained || offset > retained.length) {
+    // Fail fast at the boundary too: offset === retained.length would
+    // "succeed" with an empty slice, which an assembling reader can only
+    // interpret as corruption (the worker guards against zero-length
+    // chunks). Honest workers never request it (their loop condition is
+    // offset < totalLength), so an at/past-end offset is always a bug.
+    if (!retained || offset >= retained.length) {
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
       this.protocol.setResultFromString(
         "No retained result for range read " +
