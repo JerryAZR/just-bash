@@ -63,97 +63,14 @@ export const SHELL_KEYWORDS: Set<string> = new Set([
 ]);
 
 /**
- * Shell builtins (for type, command -v, builtin, etc.)
+ * Shell builtins (for type, command -v, builtin, etc.) and the set of
+ * names with no implementation. Both are DERIVED from BUILTIN_MANIFEST
+ * (the single source of truth) — see builtin-manifest.ts. Membership is
+ * about DISPLAY (type, command -v) and POSIX mode behavior, not
+ * resolvability: the unimplemented subset falls through to external
+ * resolution at runtime and fails with exit 127.
  */
-export const SHELL_BUILTINS: Set<string> = new Set([
-  ":",
-  "true",
-  "false",
-  "cd",
-  "export",
-  "unset",
-  "exit",
-  "local",
-  "set",
-  "break",
-  "continue",
-  "return",
-  "eval",
-  "shift",
-  "getopts",
-  "compgen",
-  "complete",
-  "compopt",
-  "pushd",
-  "popd",
-  "dirs",
-  "source",
-  ".",
-  "read",
-  "mapfile",
-  "readarray",
-  "declare",
-  "typeset",
-  "readonly",
-  "let",
-  "command",
-  "shopt",
-  "exec",
-  "test",
-  "[",
-  "echo",
-  "printf",
-  "pwd",
-  "alias",
-  "unalias",
-  "type",
-  "hash",
-  "ulimit",
-  "umask",
-  "trap",
-  "times",
-  "wait",
-  "kill",
-  "jobs",
-  "fg",
-  "bg",
-  "disown",
-  "suspend",
-  "fc",
-  "history",
-  "help",
-  "enable",
-  "builtin",
-  "caller",
-]);
-
-/**
- * Names in the builtin display sets that have NO implementation: dispatch
- * has no handler for them, so at runtime they fall through to external
- * resolution and fail with "command not found" (exit 127). Real bash
- * implements these; just-bash does not (yet).
- *
- * Membership in POSIX_SPECIAL_BUILTINS / SHELL_BUILTINS is about DISPLAY
- * (type, command -v) and POSIX mode behavior — not about resolvability.
- * Static analysis (Bash.analyzeCommands) subtracts this set so its
- * results match dispatch. Keep this honest: the parity test in
- * command-analysis.test.ts runs every display-set name through both
- * runtime dispatch and analysis and fails on any divergence — both when
- * a name here gets implemented (remove it) and when a new unimplemented
- * name joins a display set (add it).
- */
-export const UNIMPLEMENTED_BUILTIN_NAMES: ReadonlySet<string> = new Set([
-  "bg",
-  "caller",
-  "disown",
-  "enable",
-  "fc",
-  "fg",
-  "jobs",
-  "kill",
-  "suspend",
-  "times",
-  "trap",
-  "ulimit",
-  "umask",
-]);
+export {
+  SHELL_BUILTINS,
+  UNIMPLEMENTED_BUILTIN_NAMES,
+} from "../builtin-manifest.js";

@@ -23,6 +23,7 @@ import type {
   RuntimeCommand,
   RuntimeCommandContext,
 } from "../types.js";
+import { builtinPhase, type ManifestHandlerName } from "./builtin-manifest.js";
 import {
   handleBreak,
   handleCd,
@@ -427,6 +428,104 @@ export type ExecuteUserScriptFn = (
 /**
  * Dispatch context containing dependencies needed for builtin dispatch
  */
+/** Stdio contract passed to builtin handlers. */
+export interface BuiltinIo {
+  stdin: string;
+  /** True when a redirection gave this command its own fd 0. `stdin`
+   * alone cannot express it: `cmd < empty-file` and an unredirected
+   * command both arrive as `""`, but only the first means EOF rather
+   * than "inherit the shell's stdin". */
+  stdinRedirected: boolean;
+  stdinSourceFd: number;
+}
+
+type BuiltinHandler = (
+  dispatchCtx: BuiltinDispatchContext,
+  args: string[],
+  io: BuiltinIo,
+) => ExecResult | null | Promise<ExecResult | null>;
+
+/**
+ * Handler functions for every manifest entry of kind "handler". The
+ * mapped type ManifestHandlerName makes coverage bidirectional at
+ * COMPILE time: a manifest handler without an entry here (or an entry
+ * here without one there) is a type error. This is the single source of
+ * truth that replaced the display-set/dispatch dual lists.
+ */
+const HANDLERS: Record<ManifestHandlerName, BuiltinHandler> = {
+  export: (d, args) => handleExport(d.ctx, args),
+  unset: (d, args) => handleUnset(d.ctx, args),
+  exit: (d, args) => handleExit(d.ctx, args),
+  local: (d, args) => handleLocal(d.ctx, args),
+  set: (d, args) => handleSet(d.ctx, args),
+  break: (d, args) => handleBreak(d.ctx, args),
+  continue: (d, args) => handleContinue(d.ctx, args),
+  return: (d, args) => handleReturn(d.ctx, args),
+  shift: (d, args) => handleShift(d.ctx, args),
+  getopts: (d, args) => handleGetopts(d.ctx, args),
+  compgen: (d, args) => handleCompgen(d.ctx, args),
+  complete: (d, args) => handleComplete(d.ctx, args),
+  compopt: (d, args) => handleCompopt(d.ctx, args),
+  pushd: (d, args) => handlePushd(d.ctx, args),
+  popd: (d, args) => handlePopd(d.ctx, args),
+  dirs: (d, args) => handleDirs(d.ctx, args),
+  source: (d, args) => handleSource(d.ctx, args),
+  ".": (d, args) => handleSource(d.ctx, args),
+  read: (d, args, io) => handleRead(d.ctx, args, io.stdin, io.stdinSourceFd),
+  mapfile: (d, args, io) => handleMapfile(d.ctx, args, io.stdin),
+  readarray: (d, args, io) => handleMapfile(d.ctx, args, io.stdin),
+  declare: (d, args) => handleDeclare(d.ctx, args),
+  typeset: (d, args) => handleDeclare(d.ctx, args),
+  readonly: (d, args) => handleReadonly(d.ctx, args),
+
+  eval: (d, args, io) => handleEval(d.ctx, args, io.stdin, io.stdinRedirected),
+  cd: (d, args) => handleCd(d.ctx, args),
+  ":": () => OK,
+  true: () => OK,
+  false: () => testResult(false),
+  let: (d, args) => handleLet(d.ctx, args),
+  command: (d, args, io) =>
+    handleCommandBuiltin(d, args, io.stdin, io.stdinRedirected),
+  builtin: (d, args, io) =>
+    handleBuiltinBuiltin(d, args, io.stdin, io.stdinRedirected),
+  shopt: (d, args) => handleShopt(d.ctx, args),
+  exec: async (d, args, io) => {
+    // exec - replace shell with command (stub: just run the command)
+    if (args.length === 0) return OK;
+    const [cmd, ...rest] = args;
+    // Re-dispatch with the same stdin, so the wrapped command inherits
+    // fd-0 ownership too (`exec cmd < empty-file` is EOF).
+    const result = await d.runCommand(
+      cmd,
+      rest,
+      [],
+      io.stdin,
+      false,
+      false,
+      -1,
+      io.stdinRedirected,
+    );
+    return { ...result, internalProducerOmitsShellPrefix: true };
+  },
+  wait: () => OK,
+  type: (d, args) =>
+    handleTypeHelper(
+      d.ctx,
+      args,
+      (name) => findFirstInPathHelper(d.ctx, name),
+      (name) => findCommandInPathHelper(d.ctx, name),
+    ),
+  hash: (d, args) => handleHash(d.ctx, args),
+  help: (d, args) => handleHelp(d.ctx, args),
+  "[": (d, args) => {
+    if (args[args.length - 1] !== "]") {
+      return failure("[: missing `]'\n", 2);
+    }
+    return evaluateTestArgs(d.ctx, args.slice(0, -1));
+  },
+  test: (d, args) => evaluateTestArgs(d.ctx, args),
+};
+
 export interface BuiltinDispatchContext {
   ctx: InterpreterContext;
   runCommand: RunCommandFn;
@@ -462,75 +561,22 @@ export async function dispatchBuiltin(
     ctx.coverage.hit(`bash:builtin:${commandName}`);
   }
 
-  // Built-in commands (special builtins that cannot be overridden by functions)
-  if (commandName === "export") {
-    return handleExport(ctx, args);
+  const io: BuiltinIo = { stdin, stdinRedirected, stdinSourceFd };
+  const phase = builtinPhase(commandName);
+  const handler =
+    phase === "early" || phase === "late"
+      ? HANDLERS[commandName as ManifestHandlerName]
+      : undefined;
+
+  // Early handlers: user-defined functions cannot override these. `eval`
+  // is bash's special case: it dispatches early only in POSIX mode.
+  if (
+    handler &&
+    (phase === "early" || (commandName === "eval" && ctx.state.options.posix))
+  ) {
+    return handler(dispatchCtx, args, io);
   }
-  if (commandName === "unset") {
-    return handleUnset(ctx, args);
-  }
-  if (commandName === "exit") {
-    return handleExit(ctx, args);
-  }
-  if (commandName === "local") {
-    return handleLocal(ctx, args);
-  }
-  if (commandName === "set") {
-    return handleSet(ctx, args);
-  }
-  if (commandName === "break") {
-    return handleBreak(ctx, args);
-  }
-  if (commandName === "continue") {
-    return handleContinue(ctx, args);
-  }
-  if (commandName === "return") {
-    return handleReturn(ctx, args);
-  }
-  // In POSIX mode, eval is a special builtin that cannot be overridden by functions
-  // In non-POSIX mode (bash default), functions can override eval
-  if (commandName === "eval" && ctx.state.options.posix) {
-    return handleEval(ctx, args, stdin, stdinRedirected);
-  }
-  if (commandName === "shift") {
-    return handleShift(ctx, args);
-  }
-  if (commandName === "getopts") {
-    return handleGetopts(ctx, args);
-  }
-  if (commandName === "compgen") {
-    return handleCompgen(ctx, args);
-  }
-  if (commandName === "complete") {
-    return handleComplete(ctx, args);
-  }
-  if (commandName === "compopt") {
-    return handleCompopt(ctx, args);
-  }
-  if (commandName === "pushd") {
-    return await handlePushd(ctx, args);
-  }
-  if (commandName === "popd") {
-    return handlePopd(ctx, args);
-  }
-  if (commandName === "dirs") {
-    return handleDirs(ctx, args);
-  }
-  if (commandName === "source" || commandName === ".") {
-    return handleSource(ctx, args);
-  }
-  if (commandName === "read") {
-    return handleRead(ctx, args, stdin, stdinSourceFd);
-  }
-  if (commandName === "mapfile" || commandName === "readarray") {
-    return handleMapfile(ctx, args, stdin);
-  }
-  if (commandName === "declare" || commandName === "typeset") {
-    return handleDeclare(ctx, args);
-  }
-  if (commandName === "readonly") {
-    return handleReadonly(ctx, args);
-  }
+
   // User-defined functions override most builtins (except special ones above)
   // This needs to happen before true/false/let which are regular builtins
   if (!skipFunctions) {
@@ -539,6 +585,7 @@ export async function dispatchBuiltin(
       return callFunction(ctx, func, args, stdin, undefined, stdinRedirected);
     }
   }
+
   // Internal transform primitive, reached through `builtin` so a user-defined
   // function with this name remains ordinary shell state. Arguments have
   // already expanded from one PIPESTATUS snapshot before dispatch.
@@ -566,81 +613,9 @@ export async function dispatchBuiltin(
       internalPipeStatusOverride: statuses,
     };
   }
-  // Simple builtins (can be overridden by functions)
-  // eval: In non-POSIX mode, functions can override eval (handled above for POSIX mode)
-  if (commandName === "eval") {
-    return handleEval(ctx, args, stdin, stdinRedirected);
-  }
-  if (commandName === "cd") {
-    return await handleCd(ctx, args);
-  }
-  if (commandName === ":" || commandName === "true") {
-    return OK;
-  }
-  if (commandName === "false") {
-    return testResult(false);
-  }
-  if (commandName === "let") {
-    return handleLet(ctx, args);
-  }
-  if (commandName === "command") {
-    return handleCommandBuiltin(dispatchCtx, args, stdin, stdinRedirected);
-  }
-  if (commandName === "builtin") {
-    return handleBuiltinBuiltin(dispatchCtx, args, stdin, stdinRedirected);
-  }
-  if (commandName === "shopt") {
-    return handleShopt(ctx, args);
-  }
-  if (commandName === "exec") {
-    // exec - replace shell with command (stub: just run the command)
-    if (args.length === 0) {
-      return OK;
-    }
-    const [cmd, ...rest] = args;
-    // Re-dispatch with the same stdin, so the wrapped command inherits fd-0
-    // ownership too (`exec cmd < empty-file` is EOF, not "no redirection").
-    const result = await runCommand(
-      cmd,
-      rest,
-      [],
-      stdin,
-      false,
-      false,
-      -1,
-      stdinRedirected,
-    );
-    return { ...result, internalProducerOmitsShellPrefix: true };
-  }
-  if (commandName === "wait") {
-    // wait - wait for background jobs (stub: no-op in this context)
-    return OK;
-  }
-  if (commandName === "type") {
-    return await handleTypeHelper(
-      ctx,
-      args,
-      (name) => findFirstInPathHelper(ctx, name),
-      (name) => findCommandInPathHelper(ctx, name),
-    );
-  }
-  if (commandName === "hash") {
-    return handleHash(ctx, args);
-  }
-  if (commandName === "help") {
-    return handleHelp(ctx, args);
-  }
-  // Test commands
-  // Note: [[ is NOT handled here because it's a keyword, not a command.
-  if (commandName === "[" || commandName === "test") {
-    let testArgs = args;
-    if (commandName === "[") {
-      if (args[args.length - 1] !== "]") {
-        return failure("[: missing `]'\n", 2);
-      }
-      testArgs = args.slice(0, -1);
-    }
-    return evaluateTestArgs(ctx, testArgs);
+
+  if (handler && phase === "late") {
+    return handler(dispatchCtx, args, io);
   }
 
   // Return null to indicate command should be handled by external resolution
