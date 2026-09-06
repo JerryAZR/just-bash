@@ -61,16 +61,3 @@ export const SHELL_KEYWORDS: Set<string> = new Set([
   "]]",
   "!",
 ]);
-
-/**
- * Shell builtins (for type, command -v, builtin, etc.) and the set of
- * names with no implementation. Both are DERIVED from BUILTIN_MANIFEST
- * (the single source of truth) — see builtin-manifest.ts. Membership is
- * about DISPLAY (type, command -v) and POSIX mode behavior, not
- * resolvability: the unimplemented subset falls through to external
- * resolution at runtime and fails with exit 127.
- */
-export {
-  SHELL_BUILTINS,
-  UNIMPLEMENTED_BUILTIN_NAMES,
-} from "../builtin-manifest.js";

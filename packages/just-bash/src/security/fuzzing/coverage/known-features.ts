@@ -6,6 +6,7 @@
  */
 
 import { getAllCommandFuzzInfo } from "../../../commands/fuzz-flags.js";
+import { BUILTIN_MANIFEST } from "../../../interpreter/builtin-manifest.js";
 
 /** Command flag features auto-generated from flagsForFuzzing metadata */
 export const CMD_FLAG_FEATURES: readonly string[] = getAllCommandFuzzInfo()
@@ -27,49 +28,16 @@ export const BASH_CMD_FEATURES = [
   "bash:cmd:ConditionalCommand",
 ] as const;
 
-/** Bash builtin commands dispatched in builtin-dispatch.ts */
-export const BASH_BUILTIN_FEATURES = [
-  "bash:builtin:export",
-  "bash:builtin:unset",
-  "bash:builtin:exit",
-  "bash:builtin:local",
-  "bash:builtin:set",
-  "bash:builtin:break",
-  "bash:builtin:continue",
-  "bash:builtin:return",
-  "bash:builtin:eval",
-  "bash:builtin:shift",
-  "bash:builtin:getopts",
-  "bash:builtin:compgen",
-  "bash:builtin:complete",
-  "bash:builtin:compopt",
-  "bash:builtin:pushd",
-  "bash:builtin:popd",
-  "bash:builtin:dirs",
-  "bash:builtin:source",
-  "bash:builtin:.",
-  "bash:builtin:read",
-  "bash:builtin:mapfile",
-  "bash:builtin:readarray",
-  "bash:builtin:declare",
-  "bash:builtin:typeset",
-  "bash:builtin:readonly",
-  "bash:builtin:cd",
-  "bash:builtin::",
-  "bash:builtin:true",
-  "bash:builtin:false",
-  "bash:builtin:let",
-  "bash:builtin:command",
-  "bash:builtin:builtin",
-  "bash:builtin:shopt",
-  "bash:builtin:exec",
-  "bash:builtin:wait",
-  "bash:builtin:type",
-  "bash:builtin:hash",
-  "bash:builtin:help",
-  "bash:builtin:[",
-  "bash:builtin:test",
-] as const;
+/** Bash builtin commands — DERIVED from BUILTIN_MANIFEST (the dispatch
+ * truth), so a new manifest handler cannot silently miss fuzz coverage.
+ * Note: coverage hits fire for all 59 display names
+ * (bash:builtin:<name>); the registry/unimplemented names are declared
+ * separately below if needed by the coverage model. */
+export const BASH_BUILTIN_FEATURES: string[] = Object.entries(
+  BUILTIN_MANIFEST,
+)
+  .filter(([, entry]) => entry.kind === "handler")
+  .map(([name]) => `bash:builtin:${name}`)
 
 /** Bash expansion operations instrumented in expansion handlers */
 export const BASH_EXPANSION_FEATURES = [

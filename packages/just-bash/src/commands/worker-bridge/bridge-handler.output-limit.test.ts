@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryFs } from "../../fs/in-memory-fs/in-memory-fs.js";
-import { BridgeHandler } from "../worker-bridge/bridge-handler.js";
+import { BridgeHandler } from "./bridge-handler.js";
 import {
   createSharedBuffer,
   OpCode,
@@ -8,7 +8,7 @@ import {
   ProtocolBuffer,
   RequestState,
   ResultState,
-} from "../worker-bridge/protocol.js";
+} from "./protocol.js";
 
 async function sendOp(
   protocol: ProtocolBuffer,

@@ -30,6 +30,28 @@ print(len(data), data == expected)
     expect(result.exitCode).toBe(0);
   }, 60_000);
 
+  it("reads a 17MB file assembled from MULTIPLE range slices", async () => {
+    // 17MB = 8MB prefix + two range slices: pins the retained-buffer
+    // no-clobber property (a range read must not replace the buffer it
+    // is reading from) and the offset-advance loop.
+    const SEVENTEEN_MB = 17_000_000;
+    const env = new Bash({
+      python: true,
+      files: { "/huge.bin": pattern(SEVENTEEN_MB) },
+    });
+    const result = await env.exec(
+      `python3 -c "
+data = open('/huge.bin', 'rb').read()
+expected = (''.join(chr(65 + (i % 26)) for i in range(len(data)))).encode()
+print(len(data), data == expected)
+"`,
+    );
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(`${SEVENTEEN_MB} True
+`);
+    expect(result.exitCode).toBe(0);
+  }, 60_000);
+
   it("writes and reads back a 9MB file", async () => {
     const env = new Bash({ python: true });
     const result = await env.exec(

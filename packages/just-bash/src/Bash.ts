@@ -36,6 +36,10 @@ import {
   mapToRecordWithExtras,
   mergeToNullPrototype,
 } from "./helpers/env.js";
+import {
+  SHELL_BUILTINS,
+  UNIMPLEMENTED_BUILTIN_NAMES,
+} from "./interpreter/builtin-manifest.js";
 import { collectCommands } from "./interpreter/command-analysis.js";
 import { resolveCommand as resolveCommandHelper } from "./interpreter/command-resolution.js";
 import {
@@ -47,11 +51,7 @@ import {
   UnresolvedCommandError,
 } from "./interpreter/errors.js";
 import { cloneArrays } from "./interpreter/helpers/array.js";
-import {
-  POSIX_SPECIAL_BUILTINS,
-  SHELL_BUILTINS,
-  UNIMPLEMENTED_BUILTIN_NAMES,
-} from "./interpreter/helpers/shell-constants.js";
+import { POSIX_SPECIAL_BUILTINS } from "./interpreter/helpers/shell-constants.js";
 import {
   buildBashopts,
   buildShellopts,

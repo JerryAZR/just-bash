@@ -795,7 +795,7 @@ export class OverlayFs implements IFileSystem {
           // The memory quota (ENOSPC) must not break a read: promotion is
           // an optimization and fall-through stays correct. Anything else
           // is a tree invariant violation — fail loud.
-          if (!(e instanceof Error) || !e.message.startsWith("ENOSPC")) {
+          if (!isFsErrorCode(e, "ENOSPC")) {
             throw e;
           }
         }
@@ -1350,7 +1350,6 @@ export class OverlayFs implements IFileSystem {
                 "ENOENT",
                 `no such file or directory, scandir '${path}'`,
               ) as NodeJS.ErrnoException;
-              err.code = "ENOENT";
               throw err;
             }
             return entriesMap;

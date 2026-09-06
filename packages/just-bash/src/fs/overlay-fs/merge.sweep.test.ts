@@ -1,6 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { mergeDiffs, type OverlayDiff } from "./merge.js";
+import { mergeDiffs } from "./merge.js";
+import type { OverlayDiff } from "./overlay-fs.js";
 
 /**
  * Sweep-specific cells and invariants. Sibling keys K+c with c < '/'
@@ -14,6 +15,8 @@ const file = (path: string, changedAt: number, extra?: object) => ({
   path,
   nodeType: "file" as const,
   content: new Uint8Array([65]),
+  mode: 0o644,
+  mtime: new Date(0),
   changedAt,
   ...extra,
 });
@@ -82,6 +85,7 @@ describe("mergeDiffs pinned semantics cells", () => {
           {
             path: "/f",
             nodeType: "file",
+            content: new Uint8Array(0),
             metadataOnly: true,
             mode: 0o755,
             mtime: new Date(1000),
@@ -104,6 +108,7 @@ describe("mergeDiffs pinned semantics cells", () => {
           {
             path: "/f",
             nodeType: "file",
+            content: new Uint8Array(0),
             metadataOnly: true,
             mode: 0o755,
             mtime: new Date(1000),
@@ -171,6 +176,8 @@ describe("mergeDiffs randomized invariants", () => {
       ...w,
       content: w.nodeType === "file" ? new Uint8Array([65]) : undefined,
       target: w.nodeType === "symlink" ? "/t" : undefined,
+      mode: 0o644,
+      mtime: new Date(0),
     }));
   const diff = fc
     .record({

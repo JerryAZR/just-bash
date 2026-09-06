@@ -982,6 +982,11 @@ function scanFile(filePath) {
       if (pattern.filePattern && !pattern.filePattern.test(filePath)) {
         continue;
       }
+      // Multiline rules run in the whole-content pass below; running
+      // them per-line too would double-report single-line matches.
+      if (pattern.multiline === true) {
+        continue;
+      }
       // Use a fresh regex for each test to avoid lastIndex issues
       // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
       const testPattern = new RegExp(
@@ -1011,7 +1016,11 @@ function scanFile(filePath) {
     if (isSecurityModule && pattern.scanSecurity !== true) continue;
     if (pattern.filePattern && !pattern.filePattern.test(filePath)) continue;
     // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
-    const re = new RegExp(pattern.pattern.source, "g");
+    const flags = pattern.pattern.flags.includes("g")
+      ? pattern.pattern.flags
+      : pattern.pattern.flags + "g";
+    // biome-ignore lint/style/noRestrictedGlobals: standalone lint script doesn't use internal utilities
+    const re = new RegExp(pattern.pattern.source, flags);
     let match = re.exec(content);
     while (match !== null) {
       const lineIndex = content.slice(0, match.index).split("\n").length - 1;

@@ -81,7 +81,7 @@ export const RequestState = {
    * loop-abort (stop() also flips its `running` flag). */
   CANCELLED: 2,
 } as const;
-export type RequestStateType = (typeof RequestState)[keyof typeof RequestState];
+type RequestStateType = (typeof RequestState)[keyof typeof RequestState];
 
 /** Host writes; the worker waits on this word. stop() never touches
  * it, so a result wait cannot be torn by cancellation. */
@@ -90,7 +90,7 @@ export const ResultState = {
   SUCCESS: 1,
   ERROR: 2,
 } as const;
-export type ResultStateType = (typeof ResultState)[keyof typeof ResultState];
+type ResultStateType = (typeof ResultState)[keyof typeof ResultState];
 
 /** Error codes */
 export const ErrorCode = {
@@ -102,10 +102,15 @@ export const ErrorCode = {
   PERMISSION_DENIED: 5,
   INVALID_PATH: 6,
   IO_ERROR: 7,
-  TIMEOUT: 8,
   NETWORK_ERROR: 9,
   NETWORK_NOT_CONFIGURED: 10,
   NOT_EMPTY: 11,
+  LOOP: 12,
+  FILE_TOO_LARGE: 13,
+  NO_SPACE: 14,
+  BUSY: 15,
+  READ_ONLY: 16,
+  CROSS_DEVICE: 17,
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -127,7 +132,6 @@ const Offset = {
 
 /** Buffer sizes */
 export const Size = {
-  CONTROL_REGION: 36,
   PATH_BUFFER: 4096,
   // 8MB transfer CHUNK size — not a semantic cap. Results larger than
   // this are assembled transparently (READ_RESULT_RANGE), and large
@@ -400,30 +404,6 @@ export class ProtocolBuffer {
         this.dataView.getFloat64(Offset.DATA_BUFFER + StatLayout.MTIME, true),
       ),
     };
-  }
-
-  waitForReady(timeout?: number): "ok" | "timed-out" | "not-equal" {
-    return _Atomics.wait(
-      this.int32View,
-      Offset.REQUEST / 4,
-      RequestState.IDLE,
-      timeout,
-    );
-  }
-
-  waitForReadyAsync(
-    timeout?: number,
-  ):
-    | { async: false; value: "not-equal" | "timed-out" }
-    | { async: true; value: Promise<"ok" | "timed-out"> } {
-    // Wait for the request word to change from IDLE (any change means
-    // the worker published a request — or stop() cancelled).
-    return _Atomics.waitAsync(
-      this.int32View,
-      Offset.REQUEST / 4,
-      RequestState.IDLE,
-      timeout,
-    );
   }
 
   /**

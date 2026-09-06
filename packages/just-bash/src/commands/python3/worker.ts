@@ -316,29 +316,26 @@ function createHOSTFS(
     Number.isSafeInteger(configuredMaxFileSize) && configuredMaxFileSize >= 0
       ? configuredMaxFileSize
       : 0;
+  // Emscripten errno numbers for every wire-reachable code (bridge
+  // map + internal EFBIG/EINVAL guards). Entries NOT reachable through
+  // the structured channel were pruned with the prose heuristic.
   const ERRNO_CODES: Record<string, number> = Object.assign(
     Object.create(null) as Record<string, number>,
     {
-      EPERM: 63,
       ENOENT: 44,
       EIO: 29,
-      EBADF: 8,
-      EAGAIN: 6,
       EACCES: 2,
       EBUSY: 10,
       EEXIST: 20,
       ENOTDIR: 54,
       EISDIR: 31,
+      ELOOP: 32,
       EINVAL: 28,
       EFBIG: 27,
-      EMFILE: 33,
       ENOSPC: 51,
-      ESPIPE: 70,
       EROFS: 69,
+      EXDEV: 75,
       ENOTEMPTY: 55,
-      ENOSYS: 52,
-      ENOTSUP: 138,
-      ENODATA: 42,
     },
   );
 
@@ -375,6 +372,18 @@ function createHOSTFS(
           return ERRNO_CODES.ENOTEMPTY;
         case BridgeErrorCode.INVALID_PATH:
           return ERRNO_CODES.EINVAL;
+        case BridgeErrorCode.LOOP:
+          return ERRNO_CODES.ELOOP;
+        case BridgeErrorCode.FILE_TOO_LARGE:
+          return ERRNO_CODES.EFBIG;
+        case BridgeErrorCode.NO_SPACE:
+          return ERRNO_CODES.ENOSPC;
+        case BridgeErrorCode.BUSY:
+          return ERRNO_CODES.EBUSY;
+        case BridgeErrorCode.READ_ONLY:
+          return ERRNO_CODES.EROFS;
+        case BridgeErrorCode.CROSS_DEVICE:
+          return ERRNO_CODES.EXDEV;
         default:
           return ERRNO_CODES.EIO;
       }
@@ -1537,7 +1546,7 @@ function activateDefense(protocolToken: string): void {
 
   defense = new WorkerDefenseInDepth({
     excludeViolationTypes: [
-      // SharedArrayBuffer/Atomics: Used by sync-fs-backend.ts for synchronous
+      // SharedArrayBuffer/Atomics: Used by worker-bridge/sync-backend.ts for synchronous
       // filesystem communication between the WASM thread and the main thread.
       "shared_array_buffer",
       "atomics",

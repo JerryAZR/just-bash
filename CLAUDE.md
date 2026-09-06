@@ -148,8 +148,8 @@ Input Script → Parser (src/parser/) → AST (src/ast/) → Interpreter (src/in
 
 - `python3.ts` - Command entry point, arg parsing, worker lifecycle, timeout with worker termination
 - `worker.ts` - Worker thread: loads CPython WASM, HOSTFS/HTTPFS bridges, defense-in-depth
-- `sync-fs-backend.ts` / `protocol.ts` - SharedArrayBuffer protocol for sync FS calls from WASM
-- `fs-bridge-handler.ts` - Main thread: processes FS requests from worker
+- `worker-bridge/sync-backend.ts` / `worker-bridge/protocol.ts` - SharedArrayBuffer protocol for sync FS calls from WASM
+- `worker-bridge/bridge-handler.ts` - Main thread: processes FS requests from worker
 - Security: isolation by construction (no JS bridge, no ctypes, no dlopen, no NODEFS)
 - Defense-in-depth: `Module._load` blocking at file scope (before WASM loads), `WorkerDefenseInDepth` after
 - WASM binary at `vendor/cpython-emscripten/` — `python.cjs` has `__emscripten_system` patched to return -1

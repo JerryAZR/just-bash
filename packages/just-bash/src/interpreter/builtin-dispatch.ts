@@ -23,7 +23,11 @@ import type {
   RuntimeCommand,
   RuntimeCommandContext,
 } from "../types.js";
-import { builtinPhase, type ManifestHandlerName } from "./builtin-manifest.js";
+import {
+  builtinPhase,
+  type ManifestHandlerName,
+  SHELL_BUILTINS,
+} from "./builtin-manifest.js";
 import {
   handleBreak,
   handleCd,
@@ -70,7 +74,6 @@ import { getErrorMessage } from "./helpers/errors.js";
 import { resolveNamerefForAssignment } from "./helpers/nameref.js";
 import { isReadonly } from "./helpers/readonly.js";
 import { failure, OK, testResult } from "./helpers/result.js";
-import { SHELL_BUILTINS } from "./helpers/shell-constants.js";
 import { computeIndexedArrayIndex } from "./simple-command-assignments.js";
 import {
   findFirstInPath as findFirstInPathHelper,
@@ -564,7 +567,8 @@ export async function dispatchBuiltin(
   const io: BuiltinIo = { stdin, stdinRedirected, stdinSourceFd };
   const phase = builtinPhase(commandName);
   const handler =
-    phase === "early" || phase === "late"
+    (phase === "early" || phase === "late") &&
+    Object.hasOwn(HANDLERS, commandName)
       ? HANDLERS[commandName as ManifestHandlerName]
       : undefined;
 

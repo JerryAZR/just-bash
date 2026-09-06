@@ -26,13 +26,19 @@ export class FsError extends Error {
   readonly bareMessage: string;
 
   constructor(code: string, message: string) {
+    if (code.length === 0) {
+      // An empty code renders as ': msg' and is invisible to fsErrorCode
+      // (which requires non-empty) — a FsError the classifier treats as
+      // codeless. Reject at construction rather than lie downstream.
+      throw new Error("FsError: code must be a non-empty errno name");
+    }
     super(message.startsWith(`${code}:`) ? message : `${code}: ${message}`);
     // NOTE: name stays "Error" — String(err) is display surface (stderrs,
     // guest errors) and node fs errors also render as "Error: ENOENT: ...".
     // Identity lives in instanceof and .code, not in the rendered name.
     this.code = code;
-    this.bareMessage = message.startsWith(`${code}: `)
-      ? message.slice(code.length + 2)
+    this.bareMessage = message.startsWith(`${code}:`)
+      ? message.slice(code.length + (message[code.length + 1] === " " ? 2 : 1))
       : message;
   }
 }
@@ -55,9 +61,11 @@ export function isFsErrorCode(err: unknown, code: string): boolean {
 /**
  * Classify any thrown value at a boundary: structured codes pass
  * through unchanged; everything else becomes the fallback (EIO by
- * default) with the original message preserved. This is the ONLY
- * classification heuristic in the system — consumers downstream of a
- * toFsError call always see a structured code.
+ * default) with the original message preserved. Provided as PUBLIC API
+ * for custom IFileSystem implementations and host-side adapters that
+ * need to normalize third-party errors before handing them to
+ * just-bash internals. Internally, boundaries that only need the code
+ * (e.g. the worker bridge) read fsErrorCode directly instead.
  */
 export function toFsError(err: unknown, fallbackCode = "EIO"): FsError {
   const code = fsErrorCode(err);

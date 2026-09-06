@@ -47,13 +47,16 @@ describe("ln command error forwarding", () => {
   });
 
   // A filesystem that does not allow symlinks reports EPERM from `symlink`,
-  // which is neither a hard link nor a statement about the target.
+  // which is neither a hard link nor a statement about the target. The
+  // injected message is deliberately UNRELATED prose: only the structured
+  // .code channel can classify this — a message-sniffing implementation
+  // would fall to the generic branch and fail the exact assertion.
   it("reports a refused symlink as a symlink failure", async () => {
     const fs = withInjectedFsError(
       new InMemoryFs({ "/target.txt": "ok\n" }),
       "symlink",
       "EPERM",
-      "operation not permitted, symlink '/link'",
+      "go away",
     );
     const env = new Bash({ fs });
 

@@ -55,6 +55,12 @@ const ERRNO_TO_BRIDGE: Record<string, ErrorCodeType> = Object.assign(
     EACCES: ErrorCode.PERMISSION_DENIED,
     EPERM: ErrorCode.PERMISSION_DENIED,
     EINVAL: ErrorCode.INVALID_PATH,
+    ELOOP: ErrorCode.LOOP,
+    EFBIG: ErrorCode.FILE_TOO_LARGE,
+    ENOSPC: ErrorCode.NO_SPACE,
+    EBUSY: ErrorCode.BUSY,
+    EROFS: ErrorCode.READ_ONLY,
+    EXDEV: ErrorCode.CROSS_DEVICE,
   },
 );
 

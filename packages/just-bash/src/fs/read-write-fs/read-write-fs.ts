@@ -1211,10 +1211,7 @@ export class ReadWriteFs implements IFileSystem {
       if (err.code === "ENOENT") {
         throw new FsError("ENOENT", `no such file or directory, mv '${src}'`);
       }
-      if (
-        isFsErrorCode(err, "EACCES") ||
-        err.message?.includes("escaping sandbox")
-      ) {
+      if (isFsErrorCode(err, "EACCES")) {
         throw e;
       }
       // For other errors, let the rename below handle it
@@ -1260,10 +1257,7 @@ export class ReadWriteFs implements IFileSystem {
         }
       }
     } catch (e) {
-      if (
-        isFsErrorCode(e, "EACCES") ||
-        (e as Error).message?.includes("escaping sandbox")
-      ) {
+      if (isFsErrorCode(e, "EACCES")) {
         throw e;
       }
       // A scan failure cannot be treated as proof that the moved tree is safe.

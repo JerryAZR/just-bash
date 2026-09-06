@@ -22,8 +22,9 @@ import {
 import type { IFileSystem } from "../fs/interface.js";
 import { serializeWord } from "../transform/serialize.js";
 import type { CommandRegistry, ExecResult } from "../types.js";
+import { SHELL_BUILTINS } from "./builtin-manifest.js";
 import { result } from "./helpers/result.js";
-import { SHELL_BUILTINS, SHELL_KEYWORDS } from "./helpers/shell-constants.js";
+import { SHELL_KEYWORDS } from "./helpers/shell-constants.js";
 import type { InterpreterState } from "./types.js";
 
 /**

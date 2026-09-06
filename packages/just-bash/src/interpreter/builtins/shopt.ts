@@ -89,6 +89,13 @@ const STUB_OPTIONS = [
 
 type ShoptOption = (typeof SHOPT_OPTIONS)[number];
 
+/** Every option name shopt recognizes (implemented ∪ stub) — the
+ * completion universe for `compgen -A shopt` / `complete -A shopt`. */
+export const ALL_SHOPT_OPTIONS: readonly string[] = [
+  ...SHOPT_OPTIONS,
+  ...STUB_OPTIONS,
+];
+
 function isShoptOption(opt: string): opt is ShoptOption {
   return SHOPT_OPTIONS.includes(opt as ShoptOption);
 }

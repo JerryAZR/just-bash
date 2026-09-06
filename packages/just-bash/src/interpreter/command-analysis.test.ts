@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../Bash.js";
 import { ParseException } from "../parser/types.js";
-import {
-  POSIX_SPECIAL_BUILTINS,
-  SHELL_BUILTINS,
-} from "./helpers/shell-constants.js";
+import { BUILTIN_MANIFEST, SHELL_BUILTINS } from "./builtin-manifest.js";
+import { POSIX_SPECIAL_BUILTINS } from "./helpers/shell-constants.js";
 
 describe("analyzeCommands", () => {
   it("collects literal command names and reports unresolved ones", async () => {
@@ -158,6 +156,17 @@ describe("analyzeCommands", () => {
     const analysis = await bash.analyzeCommands("[[ -n $(missingcmd) ]]");
     expect(analysis.commands).toEqual([]);
     expect(analysis.unresolved).toEqual([]);
+  });
+
+  it("every manifest name has a help entry (manifest ⊆ BUILTIN_HELP)", async () => {
+    // help may document MORE than the manifest (e.g. bash builtins we do
+    // not implement), but a manifest name without help is a drift bug —
+    // `type X` says builtin while `help X` fails.
+    const { BUILTIN_HELP } = await import("./builtins/help.js");
+    const missing = Object.keys(BUILTIN_MANIFEST).filter(
+      (name) => !BUILTIN_HELP.has(name),
+    );
+    expect(missing).toEqual([]);
   });
 
   it("resolves functions regardless of definition order (documented divergence)", async () => {

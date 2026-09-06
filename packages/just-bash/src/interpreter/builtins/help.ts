@@ -18,7 +18,7 @@ import type { InterpreterContext } from "../types.js";
  * The synopsis is the short form shown with -s and in the list.
  * The description is the detailed help text.
  */
-const BUILTIN_HELP = new Map<string, [string, string]>([
+export const BUILTIN_HELP: Map<string, [string, string]> = new Map([
   [
     ":",
     [
@@ -151,6 +151,18 @@ const BUILTIN_HELP = new Map<string, [string, string]>([
 
     Exit Status:
     Returns exit status of COMMAND, or failure if COMMAND is not found.`,
+    ],
+  ],
+  [
+    "compopt",
+    [
+      "compopt [-o option] [-DE] [name ...]",
+      `Modify completion options for each NAME.
+    Intended to be used from within a shell function generating possible
+    completions.  just-bash accepts and validates the options; completion
+    behavior is not interactive.
+    Exit Status:
+    Returns success unless an invalid option is supplied.`,
     ],
   ],
   [

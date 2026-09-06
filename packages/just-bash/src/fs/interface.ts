@@ -123,7 +123,8 @@ export interface CpOptions {
  * {@link FsError} (or any node-style error with a string `.code`
  * property) using POSIX errno names — `"ENOENT"`, `"EACCES"`,
  * `"EEXIST"`, `"ENOTDIR"`, `"EISDIR"`, `"ENOTEMPTY"`, `"EPERM"`,
- * `"EINVAL"`, `"EBUSY"`, `"ELOOP"`, `"EFBIG"`, `"EXDEV"`. Consumers
+ * `"EINVAL"`, `"EBUSY"`, `"ELOOP"`, `"EFBIG"`, `"EXDEV"`, `"ENOSPC"`,
+ * `"EROFS"`, `"EIO"`. Consumers
  * (commands, bridged runtimes like python3, and error mappings) read
  * the code from `.code`; they never parse it out of message prose.
  * Errors with no structured code are classified at the boundary as

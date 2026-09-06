@@ -27,6 +27,7 @@ import { BoundedStringBuilder } from "../../bounded-builder.js";
 import { utf8ByteLength } from "../../encoding.js";
 import { type ParseException, Parser, parse } from "../../parser/parser.js";
 import type { ExecResult } from "../../types.js";
+import { SHELL_BUILTINS as MANIFEST_SHELL_BUILTINS } from "../builtin-manifest.js";
 import { matchPattern } from "../conditionals.js";
 import { ExecutionLimitError } from "../errors.js";
 import { expandWord, getArrayElements } from "../expansion.js";
@@ -39,7 +40,9 @@ import {
   hasArray,
 } from "../helpers/array.js";
 import { failure, result, success } from "../helpers/result.js";
+import { SHELL_KEYWORDS as CONSTANTS_SHELL_KEYWORDS } from "../helpers/shell-constants.js";
 import type { InterpreterContext } from "../types.js";
+import { ALL_SHOPT_OPTIONS } from "./shopt.js";
 
 const preserveWordlistEscapes = (part: WordPart): WordPart => {
   if (part.type === "Escaped") return AST.literal(`\\${part.value}`);
@@ -49,151 +52,11 @@ const preserveWordlistEscapes = (part: WordPart): WordPart => {
   return part;
 };
 
-// List of shell keywords (matches bash)
-const SHELL_KEYWORDS = [
-  "!",
-  "[[",
-  "]]",
-  "case",
-  "do",
-  "done",
-  "elif",
-  "else",
-  "esac",
-  "fi",
-  "for",
-  "function",
-  "if",
-  "in",
-  "then",
-  "time",
-  "until",
-  "while",
-  "{",
-  "}",
-];
+const SHELL_KEYWORDS = CONSTANTS_SHELL_KEYWORDS;
 
-// List of shell builtins
-const SHELL_BUILTINS = [
-  ".",
-  ":",
-  "[",
-  "alias",
-  "bg",
-  "bind",
-  "break",
-  "builtin",
-  "caller",
-  "cd",
-  "command",
-  "compgen",
-  "complete",
-  "compopt",
-  "continue",
-  "declare",
-  "dirs",
-  "disown",
-  "echo",
-  "enable",
-  "eval",
-  "exec",
-  "exit",
-  "export",
-  "false",
-  "fc",
-  "fg",
-  "getopts",
-  "hash",
-  "help",
-  "history",
-  "jobs",
-  "kill",
-  "let",
-  "local",
-  "logout",
-  "mapfile",
-  "popd",
-  "printf",
-  "pushd",
-  "pwd",
-  "read",
-  "readarray",
-  "readonly",
-  "return",
-  "set",
-  "shift",
-  "shopt",
-  "source",
-  "suspend",
-  "test",
-  "times",
-  "trap",
-  "true",
-  "type",
-  "typeset",
-  "ulimit",
-  "umask",
-  "unalias",
-  "unset",
-  "wait",
-];
+const SHELL_BUILTINS = MANIFEST_SHELL_BUILTINS;
 
-// List of shopt options
-const SHOPT_OPTIONS = [
-  "autocd",
-  "assoc_expand_once",
-  "cdable_vars",
-  "cdspell",
-  "checkhash",
-  "checkjobs",
-  "checkwinsize",
-  "cmdhist",
-  "compat31",
-  "compat32",
-  "compat40",
-  "compat41",
-  "compat42",
-  "compat43",
-  "compat44",
-  "complete_fullquote",
-  "direxpand",
-  "dirspell",
-  "dotglob",
-  "execfail",
-  "expand_aliases",
-  "extdebug",
-  "extglob",
-  "extquote",
-  "failglob",
-  "force_fignore",
-  "globasciiranges",
-  "globstar",
-  "gnu_errfmt",
-  "histappend",
-  "histreedit",
-  "histverify",
-  "hostcomplete",
-  "huponexit",
-  "inherit_errexit",
-  "interactive_comments",
-  "lastpipe",
-  "lithist",
-  "localvar_inherit",
-  "localvar_unset",
-  "login_shell",
-  "mailwarn",
-  "no_empty_cmd_completion",
-  "nocaseglob",
-  "nocasematch",
-  "nullglob",
-  "progcomp",
-  "progcomp_alias",
-  "promptvars",
-  "restricted_shell",
-  "shift_verbose",
-  "sourcepath",
-  "xpg_echo",
-];
+const SHOPT_OPTIONS = ALL_SHOPT_OPTIONS;
 
 // List of help topics (builtin command names that have help)
 const HELP_TOPICS = SHELL_BUILTINS;

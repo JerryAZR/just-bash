@@ -20,13 +20,13 @@
  * the old display-set/dispatch dual truth unrepresentable.
  */
 
-export type BuiltinKind = "handler" | "registry" | "unimplemented";
-
-export interface BuiltinManifestEntry {
-  kind: BuiltinKind;
-  /** Handler dispatch order; meaningless for other kinds. */
-  phase?: "early" | "late";
-}
+/** Discriminated union: a handler entry MUST carry its dispatch phase —
+ * an optional `phase?` would let a phaseless handler compile and fall
+ * silently through to external resolution (exit 127). */
+export type BuiltinManifestEntry =
+  | { kind: "handler"; phase: "early" | "late" }
+  | { kind: "registry" }
+  | { kind: "unimplemented" };
 
 type ManifestShape = Record<string, BuiltinManifestEntry>;
 
@@ -107,6 +107,12 @@ const manifest = {
 } as const;
 
 const _manifestShapeCheck: ManifestShape = manifest;
+
+// Freeze against runtime mutation: builtinPhase reads this object live,
+// while SHELL_BUILTINS/UNIMPLEMENTED_BUILTIN_NAMES were built once —
+// a mutation would desync the derived sets from dispatch.
+for (const entry of Object.values(manifest)) Object.freeze(entry);
+Object.freeze(manifest);
 
 export const BUILTIN_MANIFEST: typeof manifest = manifest;
 
