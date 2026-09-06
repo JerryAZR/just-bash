@@ -149,4 +149,31 @@ describe("ranged bridge ops", () => {
       await run;
     }
   });
+
+  it("range read past the retained result fails with range details", async () => {
+    const shared = createSharedBuffer();
+    const protocol = new ProtocolBuffer(shared);
+    const handler = new BridgeHandler(
+      shared,
+      new InMemoryFs(),
+      "/",
+      "test-cmd",
+    );
+    const run = handler.run(10_000);
+    try {
+      // No prior op published a retained result.
+      const res = await sendOp(protocol, OpCode.READ_RESULT_RANGE, {
+        flags: 3,
+        mode: 10,
+      });
+      expect(res.status).toBe(ResultState.ERROR);
+      expect(protocol.getErrorCode()).toBe(ErrorCode.IO_ERROR);
+      expect(protocol.getResultAsString()).toBe(
+        "No retained result for range read (offset=3, length=10, retained=none)",
+      );
+    } finally {
+      handler.stop();
+      await run;
+    }
+  });
 });

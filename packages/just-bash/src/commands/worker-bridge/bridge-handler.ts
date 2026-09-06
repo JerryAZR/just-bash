@@ -260,7 +260,10 @@ export class BridgeHandler {
     const retained = this.lastResult;
     if (!retained || offset > retained.length) {
       this.protocol.setErrorCode(ErrorCode.IO_ERROR);
-      this.protocol.setResultFromString("No retained result for range read");
+      this.protocol.setResultFromString(
+        "No retained result for range read " +
+          `(offset=${offset}, length=${length}, retained=${retained?.length ?? "none"})`,
+      );
       this.protocol.setResultState(ResultState.ERROR);
       return;
     }
