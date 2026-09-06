@@ -238,7 +238,7 @@ describe("just-bash CLI", () => {
 
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe(
-        "Error: Cannot read script file: script-name\nEIO: open '<path>'\n",
+        "Error: Cannot read script file: script-name\nEISDIR: open '<path>'\n",
       );
       expect(result.exitCode).toBe(1);
     });
