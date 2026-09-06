@@ -21,6 +21,7 @@ import {
   getEncoding,
   toBuffer,
 } from "../encoding.js";
+import { FsError, isFsErrorCode } from "../fs-error.js";
 import type {
   CpOptions,
   DirentEntry,
@@ -196,7 +197,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, open '${path}'`,
+        );
       }
       if (err.code === "EISDIR") {
         throw new Error(
@@ -205,7 +209,10 @@ export class ReadWriteFs implements IFileSystem {
       }
       if (err.code === "ELOOP") {
         // O_NOFOLLOW caught a symlink swap (TOCTOU defense)
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       this.sanitizeError(e, path, "open");
     }
@@ -245,7 +252,7 @@ export class ReadWriteFs implements IFileSystem {
       try {
         const pathStat = await fs.promises.lstat(canonical);
         if (!pathStat.isFile() && !pathStat.isDirectory()) {
-          throw new Error(`EACCES: cannot write special file '${path}'`);
+          throw new FsError("EACCES", `cannot write special file '${path}'`);
         }
         const fh = await fs.promises.open(
           canonical,
@@ -254,7 +261,7 @@ export class ReadWriteFs implements IFileSystem {
         try {
           existingStat = await fh.stat();
           if (!existingStat.isFile()) {
-            throw new Error(`EACCES: cannot write special file '${path}'`);
+            throw new FsError("EACCES", `cannot write special file '${path}'`);
           }
           if (existingStat.nlink <= 1) {
             await fh.truncate(0);
@@ -271,7 +278,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ELOOP") {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       this.sanitizeError(e, path, "write");
     }
@@ -308,7 +318,7 @@ export class ReadWriteFs implements IFileSystem {
       try {
         const pathStat = await fs.promises.lstat(canonical);
         if (!pathStat.isFile() && !pathStat.isDirectory()) {
-          throw new Error(`EACCES: cannot append special file '${path}'`);
+          throw new FsError("EACCES", `cannot append special file '${path}'`);
         }
         const permissionHandle = await fs.promises.open(
           canonical,
@@ -320,7 +330,7 @@ export class ReadWriteFs implements IFileSystem {
         try {
           existingStat = await permissionHandle.stat();
           if (!existingStat.isFile()) {
-            throw new Error(`EACCES: cannot append special file '${path}'`);
+            throw new FsError("EACCES", `cannot append special file '${path}'`);
           }
           if (existingStat.nlink <= 1) {
             await permissionHandle.writeFile(buffer);
@@ -349,7 +359,10 @@ export class ReadWriteFs implements IFileSystem {
           stat.dev !== existingStat.dev ||
           stat.ino !== existingStat.ino
         ) {
-          throw new Error(`EACCES: file identity changed, append '${path}'`);
+          throw new FsError(
+            "EACCES",
+            `file identity changed, append '${path}'`,
+          );
         }
         await this.replaceFile(canonical, buffer, stat, {
           handle: source,
@@ -361,7 +374,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ELOOP") {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       this.sanitizeError(e, path, "append");
     }
@@ -485,7 +501,7 @@ export class ReadWriteFs implements IFileSystem {
         if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       }
     }
-    if (!fh) throw new Error(`EEXIST: replacement write '${canonical}'`);
+    if (!fh) throw new FsError("EEXIST", `replacement write '${canonical}'`);
     const tempHandle = fh;
     const tempIdentity = await tempHandle.stat();
     let committed = false;
@@ -503,7 +519,7 @@ export class ReadWriteFs implements IFileSystem {
               position + offset,
             );
             if (bytesWritten === 0) {
-              throw new Error("EIO: replacement write made no progress");
+              throw new FsError("EIO", "replacement write made no progress");
             }
             offset += bytesWritten;
           }
@@ -553,7 +569,7 @@ export class ReadWriteFs implements IFileSystem {
         stagedIdentity.dev !== tempIdentity.dev ||
         stagedIdentity.ino !== tempIdentity.ino
       ) {
-        throw new Error("EACCES: replacement staging entry changed");
+        throw new FsError("EACCES", "replacement staging entry changed");
       }
       await fs.promises.rename(tempPath, canonical);
       committed = true;
@@ -589,7 +605,10 @@ export class ReadWriteFs implements IFileSystem {
       // instead of following it.
       const stat = await fs.promises.lstat(canonical);
       if (!this.allowSymlinks && stat.isSymbolicLink()) {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       return {
         isFile: stat.isFile(),
@@ -605,7 +624,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, stat '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "stat");
     }
@@ -632,7 +654,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, lstat '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "lstat");
     }
@@ -660,10 +685,13 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "EEXIST") {
-        throw new Error(`EEXIST: file already exists, mkdir '${path}'`);
+        throw new FsError("EEXIST", `file already exists, mkdir '${path}'`);
       }
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, mkdir '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, mkdir '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "mkdir");
     }
@@ -687,7 +715,10 @@ export class ReadWriteFs implements IFileSystem {
       if (!this.allowSymlinks) {
         const dirStat = await fs.promises.lstat(canonical);
         if (dirStat.isSymbolicLink()) {
-          throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+          throw new FsError(
+            "EACCES",
+            `permission denied, '${path}' is a symlink`,
+          );
         }
       }
       const entries = await fs.promises.readdir(canonical, {
@@ -704,10 +735,13 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, scandir '${path}'`,
+        );
       }
       if (err.code === "ENOTDIR") {
-        throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
+        throw new FsError("ENOTDIR", `not a directory, scandir '${path}'`);
       }
       this.sanitizeError(e, path, "scandir");
     }
@@ -728,7 +762,10 @@ export class ReadWriteFs implements IFileSystem {
     try {
       const stat = await fs.promises.lstat(canonical);
       if (!this.allowSymlinks && stat.isSymbolicLink()) {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       await fs.promises.rm(canonical, {
         recursive: options?.recursive ?? false,
@@ -738,10 +775,10 @@ export class ReadWriteFs implements IFileSystem {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
         if (options?.force) return;
-        throw new Error(`ENOENT: no such file or directory, rm '${path}'`);
+        throw new FsError("ENOENT", `no such file or directory, rm '${path}'`);
       }
       if (err.code === "ENOTEMPTY") {
-        throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
+        throw new FsError("ENOTEMPTY", `directory not empty, rm '${path}'`);
       }
       this.sanitizeError(e, path, "rm");
     }
@@ -772,7 +809,7 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, cp '${src}'`);
+        throw new FsError("ENOENT", `no such file or directory, cp '${src}'`);
       }
       this.sanitizeError(e, src, "cp");
     }
@@ -780,7 +817,10 @@ export class ReadWriteFs implements IFileSystem {
       srcStat.isDirectory() &&
       isPathWithinRoot(destCanonical, srcCanonical)
     ) {
-      throw new Error(`EINVAL: cannot copy '${src}' into itself, '${dest}'`);
+      throw new FsError(
+        "EINVAL",
+        `cannot copy '${src}' into itself, '${dest}'`,
+      );
     }
     if (!srcStat.isDirectory()) {
       try {
@@ -842,10 +882,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, cp '${src}'`);
+        throw new FsError("ENOENT", `no such file or directory, cp '${src}'`);
       }
       if (err.code === "EISDIR") {
-        throw new Error(`EISDIR: is a directory, cp '${src}'`);
+        throw new FsError("EISDIR", `is a directory, cp '${src}'`);
       }
       this.sanitizeError(e, src, "cp");
     }
@@ -907,7 +947,7 @@ export class ReadWriteFs implements IFileSystem {
     }
     if (stat.isDirectory()) {
       if (!recursive) {
-        throw new Error(`EISDIR: is a directory, cp '${virtualSource}'`);
+        throw new FsError("EISDIR", `is a directory, cp '${virtualSource}'`);
       }
       let destination = this.resolveAndValidate(
         destinationReal,
@@ -932,7 +972,7 @@ export class ReadWriteFs implements IFileSystem {
       await fs.promises.chmod(destination, stat.mode & 0o7777);
       return;
     }
-    throw new Error(`EINVAL: unsupported file type, cp '${virtualSource}'`);
+    throw new FsError("EINVAL", `unsupported file type, cp '${virtualSource}'`);
   }
 
   private async assertCopyDestinationWritable(
@@ -1002,13 +1042,16 @@ export class ReadWriteFs implements IFileSystem {
         break;
       } catch (e) {
         const err = e as NodeJS.ErrnoException;
-        if (err.code !== "EEXIST" && !err.message.startsWith("EEXIST:")) {
+        if (!isFsErrorCode(err, "EEXIST")) {
           throw e;
         }
       }
     }
     if (!tempIdentity) {
-      throw new Error(`EEXIST: replacement symlink '${virtualDestination}'`);
+      throw new FsError(
+        "EEXIST",
+        `replacement symlink '${virtualDestination}'`,
+      );
     }
 
     let committed = false;
@@ -1019,7 +1062,7 @@ export class ReadWriteFs implements IFileSystem {
         stagedIdentity.dev !== tempIdentity.dev ||
         stagedIdentity.ino !== tempIdentity.ino
       ) {
-        throw new Error("EACCES: replacement symlink entry changed");
+        throw new FsError("EACCES", "replacement symlink entry changed");
       }
       await fs.promises.rename(tempCanonical, destination);
       committed = true;
@@ -1063,7 +1106,7 @@ export class ReadWriteFs implements IFileSystem {
     const stat = await fs.promises.lstat(source);
     const identity = `${stat.dev}:${stat.ino}`;
     if (visited.has(identity)) {
-      throw new Error(`ELOOP: cp '${virtualSource}' contains a cycle`);
+      throw new FsError("ELOOP", `cp '${virtualSource}' contains a cycle`);
     }
     if (stat.isSymbolicLink()) {
       if (!this.allowSymlinks) {
@@ -1115,7 +1158,7 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, mv '${src}'`);
+        throw new FsError("ENOENT", `no such file or directory, mv '${src}'`);
       }
       this.sanitizeError(e, src, "mv");
     }
@@ -1123,7 +1166,10 @@ export class ReadWriteFs implements IFileSystem {
       sourceStat.isDirectory() &&
       this.isSameOrDescendantIdentity(srcCanonical, destCanonical)
     ) {
-      throw new Error(`EINVAL: cannot move '${src}' into itself, '${dest}'`);
+      throw new FsError(
+        "EINVAL",
+        `cannot move '${src}' into itself, '${dest}'`,
+      );
     }
 
     // Check if source is a symlink - if so, validate that its target
@@ -1148,10 +1194,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, mv '${src}'`);
+        throw new FsError("ENOENT", `no such file or directory, mv '${src}'`);
       }
       if (
-        err.message?.includes("EACCES") ||
+        isFsErrorCode(err, "EACCES") ||
         err.message?.includes("escaping sandbox")
       ) {
         throw e;
@@ -1172,7 +1218,7 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, mv '${src}'`);
+        throw new FsError("ENOENT", `no such file or directory, mv '${src}'`);
       }
       // If rename fails across devices, fall back to copy + delete
       if (err.code === "EXDEV") {
@@ -1199,7 +1245,7 @@ export class ReadWriteFs implements IFileSystem {
       }
     } catch (e) {
       if (
-        (e as Error).message?.includes("EACCES") ||
+        isFsErrorCode(e, "EACCES") ||
         (e as Error).message?.includes("escaping sandbox")
       ) {
         throw e;
@@ -1250,7 +1296,7 @@ export class ReadWriteFs implements IFileSystem {
       );
       if (!(await this.exists(candidate))) return candidate;
     }
-    throw new Error(`EEXIST: mv '${path}'`);
+    throw new FsError("EEXIST", `mv '${path}'`);
   }
 
   /**
@@ -1454,7 +1500,7 @@ export class ReadWriteFs implements IFileSystem {
       try {
         const stat = await source.stat();
         if (!stat.isFile()) {
-          throw new Error(`EACCES: file type changed, chmod '${path}'`);
+          throw new FsError("EACCES", `file type changed, chmod '${path}'`);
         }
         await this.replaceFile(
           canonical,
@@ -1470,10 +1516,16 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, chmod '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, chmod '${path}'`,
+        );
       }
       if (err.code === "ELOOP") {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       this.sanitizeError(e, path, "chmod");
     }
@@ -1490,7 +1542,10 @@ export class ReadWriteFs implements IFileSystem {
     linkPath: string,
   ): Promise<void> {
     if (!this.allowSymlinks) {
-      throw new Error(`EPERM: operation not permitted, symlink '${linkPath}'`);
+      throw new FsError(
+        "EPERM",
+        `operation not permitted, symlink '${linkPath}'`,
+      );
     }
     validatePath(linkPath, "symlink");
     const realLinkPath = this.toRealPath(linkPath);
@@ -1526,7 +1581,10 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "EEXIST") {
-        throw new Error(`EEXIST: file already exists, symlink '${linkPath}'`);
+        throw new FsError(
+          "EEXIST",
+          `file already exists, symlink '${linkPath}'`,
+        );
       }
       this.sanitizeError(e, linkPath, "symlink");
     }
@@ -1567,7 +1625,7 @@ export class ReadWriteFs implements IFileSystem {
         );
       }
       if (err.code === "EEXIST") {
-        throw new Error(`EEXIST: file already exists, link '${newPath}'`);
+        throw new FsError("EEXIST", `file already exists, link '${newPath}'`);
       }
       if (err.code === "EPERM") {
         throw new Error(
@@ -1627,7 +1685,7 @@ export class ReadWriteFs implements IFileSystem {
         );
       }
       if (err.code === "EINVAL") {
-        throw new Error(`EINVAL: invalid argument, readlink '${path}'`);
+        throw new FsError("EINVAL", `invalid argument, readlink '${path}'`);
       }
       this.sanitizeError(e, path, "readlink");
     }
@@ -1649,7 +1707,10 @@ export class ReadWriteFs implements IFileSystem {
     try {
       this.resolveAndValidate(realPath, path);
     } catch {
-      throw new Error(`ENOENT: no such file or directory, realpath '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, realpath '${path}'`,
+      );
     }
 
     let resolved: string;
@@ -1679,7 +1740,10 @@ export class ReadWriteFs implements IFileSystem {
       return relative || "/";
     }
     // Resolved path is outside root - reject it to prevent sandbox escape
-    throw new Error(`ENOENT: no such file or directory, realpath '${path}'`);
+    throw new FsError(
+      "ENOENT",
+      `no such file or directory, realpath '${path}'`,
+    );
   }
 
   /**
@@ -1728,7 +1792,7 @@ export class ReadWriteFs implements IFileSystem {
       try {
         const stat = await source.stat();
         if (!stat.isFile()) {
-          throw new Error(`EACCES: file type changed, utimes '${path}'`);
+          throw new FsError("EACCES", `file type changed, utimes '${path}'`);
         }
         await this.replaceFile(
           canonical,
@@ -1744,10 +1808,16 @@ export class ReadWriteFs implements IFileSystem {
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, utimes '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, utimes '${path}'`,
+        );
       }
       if (err.code === "ELOOP") {
-        throw new Error(`EACCES: permission denied, '${path}' is a symlink`);
+        throw new FsError(
+          "EACCES",
+          `permission denied, '${path}' is a symlink`,
+        );
       }
       this.sanitizeError(e, path, "utimes");
     }

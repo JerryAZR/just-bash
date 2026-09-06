@@ -118,6 +118,18 @@ export interface CpOptions {
  * - InMemoryFs (in-memory, default)
  * - Real filesystem (via node:fs)
  * - Custom implementations (e.g., remote storage, browser IndexedDB)
+ *
+ * ERROR CONTRACT: implementations signal failure kind by throwing
+ * {@link FsError} (or any node-style error with a string `.code`
+ * property) using POSIX errno names — `"ENOENT"`, `"EACCES"`,
+ * `"EEXIST"`, `"ENOTDIR"`, `"EISDIR"`, `"ENOTEMPTY"`, `"EPERM"`,
+ * `"EINVAL"`, `"EBUSY"`, `"ELOOP"`, `"EFBIG"`, `"EXDEV"`. Consumers
+ * (commands, bridged runtimes like python3, and error mappings) read
+ * the code from `.code`; they never parse it out of message prose.
+ * Errors with no structured code are classified at the boundary as
+ * EIO — an honest unknown, never a fabricated specific errno.
+ * Message text is free-form; by convention FsError renders
+ * `"ECODE: message"` for display.
  */
 export interface IFileSystem {
   // Note: Sync method are not supported and must not be added.

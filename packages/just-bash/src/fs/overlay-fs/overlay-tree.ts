@@ -21,6 +21,7 @@
  * All traversals are iterative — no recursion depth limits on deep trees.
  */
 
+import { FsError } from "../fs-error.js";
 import { DEFAULT_DIR_MODE } from "../path-utils.js";
 
 export interface OverlayFileNode {
@@ -142,7 +143,7 @@ export function coalesceFileContent(
     node.content.byteLength,
   );
   if (!Number.isSafeInteger(total)) {
-    throw new Error(`EFBIG: file too large, read '${virtualPath}'`);
+    throw new FsError("EFBIG", `file too large, read '${virtualPath}'`);
   }
   const combined = new Uint8Array(total);
   combined.set(node.content);
@@ -251,7 +252,7 @@ export class OverlayTree {
       } else if (child.type === "whiteout") {
         child = this.resurrectDir(current, segment, currentPath, lowerChildren);
       } else if (child.type !== "directory") {
-        throw new Error(`ENOTDIR: not a directory, mkdir '${path}'`);
+        throw new FsError("ENOTDIR", `not a directory, mkdir '${path}'`);
       }
       current = child;
     }
@@ -302,7 +303,7 @@ export class OverlayTree {
     node.changedAt = Date.now();
     const segments = splitPath(path);
     if (segments.length === 0) {
-      throw new Error(`EINVAL: cannot attach at root, attach '${path}'`);
+      throw new FsError("EINVAL", `cannot attach at root, attach '${path}'`);
     }
     const parent = this.parentDirOf(segments, path);
     const current = parent.children.get(segments[segments.length - 1]);
@@ -349,7 +350,7 @@ export class OverlayTree {
   putWhiteout(path: string): void {
     const segments = splitPath(path);
     if (segments.length === 0) {
-      throw new Error(`EINVAL: cannot whiteout the root, rm '${path}'`);
+      throw new FsError("EINVAL", `cannot whiteout the root, rm '${path}'`);
     }
     let parent = this.rootNode;
     for (let i = 0; i < segments.length - 1; i++) {
@@ -473,7 +474,7 @@ export class OverlayTree {
     for (let i = 0; i < segments.length - 1; i++) {
       const child = current.children.get(segments[i]);
       if (child?.type !== "directory") {
-        throw new Error(`ENOTDIR: not a directory, attach '${path}'`);
+        throw new FsError("ENOTDIR", `not a directory, attach '${path}'`);
       }
       current = child;
     }
@@ -494,7 +495,7 @@ export class OverlayTree {
       child = freshDirNode();
       parent.children.set(name, child);
     } else if (child.type !== "directory") {
-      throw new Error(`ENOTDIR: not a directory, rm '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, rm '${path}'`);
     }
     return child;
   }

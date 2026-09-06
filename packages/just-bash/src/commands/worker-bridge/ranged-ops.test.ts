@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FsError } from "../../fs/fs-error.js";
 import { InMemoryFs } from "../../fs/in-memory-fs/in-memory-fs.js";
 import { BridgeHandler } from "./bridge-handler.js";
 import {
@@ -127,7 +128,7 @@ describe("ranged bridge ops", () => {
     class DenyReadFs extends InMemoryFs {
       override async readFileBuffer(path: string): Promise<Uint8Array> {
         if (path === "/secret.txt") {
-          throw new Error("EACCES: permission denied");
+          throw new FsError("EACCES", "permission denied");
         }
         return super.readFileBuffer(path);
       }

@@ -6,6 +6,7 @@
  */
 
 import { fromBuffer } from "../../fs/encoding.js";
+import { fsErrorCode } from "../../fs/fs-error.js";
 import type { IFileSystem } from "../../fs/interface.js";
 import {
   sanitizeErrorMessage,
@@ -36,6 +37,34 @@ export interface BridgeOutput {
 /**
  * Handles requests from a worker thread.
  */
+/**
+ * Map a carried errno (FsError / node-style .code) to the bridge wire
+ * code. This is the ONLY classification on the bridge error path:
+ * structured codes in, wire codes out. An error with no structured
+ * code is IO_ERROR — an honest unknown, never a fabricated specific
+ * code guessed from prose.
+ */
+const ERRNO_TO_BRIDGE: Record<string, ErrorCodeType> = Object.assign(
+  Object.create(null) as Record<string, ErrorCodeType>,
+  {
+    ENOENT: ErrorCode.NOT_FOUND,
+    EISDIR: ErrorCode.IS_DIRECTORY,
+    ENOTDIR: ErrorCode.NOT_DIRECTORY,
+    ENOTEMPTY: ErrorCode.NOT_EMPTY,
+    EEXIST: ErrorCode.EXISTS,
+    EACCES: ErrorCode.PERMISSION_DENIED,
+    EPERM: ErrorCode.PERMISSION_DENIED,
+    EINVAL: ErrorCode.INVALID_PATH,
+  },
+);
+
+function bridgeErrorCodeFromErrno_(code: string | undefined): ErrorCodeType {
+  if (code !== undefined && Object.hasOwn(ERRNO_TO_BRIDGE, code)) {
+    return ERRNO_TO_BRIDGE[code];
+  }
+  return ErrorCode.IO_ERROR;
+}
+
 export class BridgeHandler {
   private protocol: ProtocolBuffer;
   private running = false;
@@ -706,43 +735,7 @@ export class BridgeHandler {
     const rawMessage = e instanceof Error ? e.message : String(e);
     const message = sanitizeErrorMessage(rawMessage);
 
-    let errorCode: ErrorCodeType = ErrorCode.IO_ERROR;
-    const lowerMsg = rawMessage.toLowerCase();
-    if (
-      lowerMsg.includes("no such file") ||
-      lowerMsg.includes("not found") ||
-      lowerMsg.includes("enoent")
-    ) {
-      errorCode = ErrorCode.NOT_FOUND;
-    } else if (
-      lowerMsg.includes("is a directory") ||
-      lowerMsg.includes("eisdir")
-    ) {
-      errorCode = ErrorCode.IS_DIRECTORY;
-    } else if (
-      lowerMsg.includes("not a directory") ||
-      lowerMsg.includes("enotdir")
-    ) {
-      errorCode = ErrorCode.NOT_DIRECTORY;
-    } else if (
-      lowerMsg.includes("not empty") ||
-      lowerMsg.includes("enotempty")
-    ) {
-      errorCode = ErrorCode.NOT_EMPTY;
-    } else if (
-      lowerMsg.includes("already exists") ||
-      lowerMsg.includes("eexist")
-    ) {
-      errorCode = ErrorCode.EXISTS;
-    } else if (
-      lowerMsg.includes("permission") ||
-      lowerMsg.includes("eperm") ||
-      lowerMsg.includes("eacces")
-    ) {
-      errorCode = ErrorCode.PERMISSION_DENIED;
-    }
-
-    this.protocol.setErrorCode(errorCode);
+    this.protocol.setErrorCode(bridgeErrorCodeFromErrno_(fsErrorCode(e)));
     this.protocol.setResultFromString(message);
     this.protocol.setResultState(ResultState.ERROR);
   }

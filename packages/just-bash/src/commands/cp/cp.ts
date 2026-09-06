@@ -197,7 +197,7 @@ export const cpCommand: RuntimeCommand = {
           throw error;
         }
         const message = getErrorMessage(error);
-        if (message.includes("ENOENT") || message.includes("no such file")) {
+        if (isFsErrorCode(error, "ENOENT")) {
           stderr += `cp: cannot stat '${src}': No such file or directory\n`;
         } else {
           stderr += `cp: cannot copy '${src}': ${message}\n`;
@@ -210,6 +210,7 @@ export const cpCommand: RuntimeCommand = {
   },
 };
 
+import { isFsErrorCode } from "../../fs/fs-error.js";
 import type { CommandFuzzInfo } from "../fuzz-flags-types.js";
 
 export const flagsForFuzzing: CommandFuzzInfo = {

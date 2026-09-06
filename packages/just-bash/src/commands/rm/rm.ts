@@ -60,10 +60,7 @@ export const rmCommand: RuntimeCommand = {
         }
       } catch (error) {
         const message = getErrorMessage(error);
-        // Fs errors are "ECODE: ..." prefixed; anchor the match so a
-        // file named e.g. "ENOENT-notes" can't smuggle a real failure
-        // past -f.
-        const isEnoent = message.startsWith("ENOENT");
+        const isEnoent = isFsErrorCode(error, "ENOENT");
         // GNU rm -f suppresses only "no such file" errors; everything
         // else (mount-point EBUSY, permission, not-empty, ...) is
         // reported even under force.
@@ -72,10 +69,7 @@ export const rmCommand: RuntimeCommand = {
         }
         if (isEnoent) {
           stderr += `rm: cannot remove '${path}': No such file or directory\n`;
-        } else if (
-          message.includes("ENOTEMPTY") ||
-          message.includes("not empty")
-        ) {
+        } else if (isFsErrorCode(error, "ENOTEMPTY")) {
           stderr += `rm: cannot remove '${path}': Directory not empty\n`;
         } else {
           stderr += `rm: cannot remove '${path}': ${sanitizeErrorMessage(message)}\n`;
@@ -88,6 +82,7 @@ export const rmCommand: RuntimeCommand = {
   },
 };
 
+import { isFsErrorCode } from "../../fs/fs-error.js";
 import type { CommandFuzzInfo } from "../fuzz-flags-types.js";
 
 export const flagsForFuzzing: CommandFuzzInfo = {

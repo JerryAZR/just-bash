@@ -29,6 +29,7 @@ import {
   getEncoding,
   toBuffer,
 } from "../encoding.js";
+import { FsError, isFsErrorCode } from "../fs-error.js";
 import type {
   CpOptions,
   DirentEntry,
@@ -244,7 +245,7 @@ export class OverlayFs implements IFileSystem {
    */
   private assertWritable(operation: string): void {
     if (this.readOnly) {
-      throw new Error(`EROFS: read-only file system, ${operation}`);
+      throw new FsError("EROFS", `read-only file system, ${operation}`);
     }
   }
 
@@ -445,7 +446,7 @@ export class OverlayFs implements IFileSystem {
     const normalized = paths.map((p) => {
       const rel = normalizePath(p);
       if (rel === "/") {
-        throw new Error(`EINVAL: invalid argument, drop '${p}'`);
+        throw new FsError("EINVAL", `invalid argument, drop '${p}'`);
       }
       return this.mountPoint === "/" ? rel : `${this.mountPoint}${rel}`;
     });
@@ -750,15 +751,18 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, open '${path}'`);
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, open '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, open '${path}'`);
     }
     if (result.kind === "found") {
       const memEntry = result.node;
       if (memEntry.type === "whiteout") {
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, open '${path}'`,
+        );
       }
       if (memEntry.type === "symlink") {
         const target = this.resolveSymlink(normalized, memEntry.target);
@@ -814,14 +818,17 @@ export class OverlayFs implements IFileSystem {
     // validation and use.
     const canonical = this.resolveRealPath_(this.toRealPath(normalized));
     if (!canonical) {
-      throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, open '${path}'`);
     }
 
     try {
       const stat = await lstatReal(canonical);
       if (stat.isSymbolicLink()) {
         if (!this.allowSymlinks) {
-          throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+          throw new FsError(
+            "ENOENT",
+            `no such file or directory, open '${path}'`,
+          );
         }
         const rawTarget = await fs.promises.readlink(canonical);
         const virtualTarget = this.realTargetToVirtual(rawTarget);
@@ -854,11 +861,17 @@ export class OverlayFs implements IFileSystem {
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, open '${path}'`,
+        );
       }
       if (code === "ELOOP") {
         // O_NOFOLLOW caught a symlink swap (TOCTOU defense)
-        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, open '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "open");
     }
@@ -933,10 +946,13 @@ export class OverlayFs implements IFileSystem {
       return;
     }
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, append '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, append '${path}'`,
+      );
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, append '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, append '${path}'`);
     }
 
     // Read through for the current content — this resolves symlinks and
@@ -950,7 +966,7 @@ export class OverlayFs implements IFileSystem {
     try {
       existingBuffer = await this.readFileBuffer(normalized);
     } catch (e) {
-      if (!(e instanceof Error) || !e.message.startsWith("ENOENT")) {
+      if (!isFsErrorCode(e, "ENOENT")) {
         throw e;
       }
       existingBuffer = new Uint8Array(0);
@@ -1042,15 +1058,18 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, stat '${path}'`);
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, stat '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, stat '${path}'`);
     }
     if (result.kind === "found") {
       const entry = result.node;
       if (entry.type === "whiteout") {
-        throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, stat '${path}'`,
+        );
       }
       // Follow symlinks
       if (entry.type === "symlink") {
@@ -1064,7 +1083,7 @@ export class OverlayFs implements IFileSystem {
     // close the TOCTOU gap between validation and use.
     const canonical = this.resolveRealPath_(this.toRealPath(normalized));
     if (!canonical) {
-      throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, stat '${path}'`);
     }
 
     try {
@@ -1074,7 +1093,10 @@ export class OverlayFs implements IFileSystem {
       const lstatResult = await lstatReal(canonical);
       if (lstatResult.isSymbolicLink()) {
         if (!this.allowSymlinks) {
-          throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+          throw new FsError(
+            "ENOENT",
+            `no such file or directory, stat '${path}'`,
+          );
         }
         const rawTarget = await fs.promises.readlink(canonical);
         const virtualTarget = this.realTargetToVirtual(rawTarget);
@@ -1093,7 +1115,10 @@ export class OverlayFs implements IFileSystem {
       };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, stat '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "stat");
     }
@@ -1105,15 +1130,18 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, lstat '${path}'`);
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, lstat '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, lstat '${path}'`);
     }
     if (result.kind === "found") {
       const entry = result.node;
       if (entry.type === "whiteout") {
-        throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, lstat '${path}'`,
+        );
       }
       return this.memoryEntryStat(entry);
     }
@@ -1124,7 +1152,7 @@ export class OverlayFs implements IFileSystem {
     // Use the canonical path for I/O to close the TOCTOU gap.
     const canonical = this.resolveRealPathParent_(this.toRealPath(normalized));
     if (!canonical) {
-      throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, lstat '${path}'`);
     }
 
     try {
@@ -1141,7 +1169,10 @@ export class OverlayFs implements IFileSystem {
       };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, lstat '${path}'`,
+        );
       }
       this.sanitizeError(e, path, "lstat");
     }
@@ -1217,7 +1248,7 @@ export class OverlayFs implements IFileSystem {
     const exists = await this.existsInOverlay(normalized);
     if (exists) {
       if (!options?.recursive) {
-        throw new Error(`EEXIST: file already exists, mkdir '${path}'`);
+        throw new FsError("EEXIST", `file already exists, mkdir '${path}'`);
       }
       return;
     }
@@ -1230,7 +1261,10 @@ export class OverlayFs implements IFileSystem {
         if (options?.recursive) {
           await this.mkdir(parent, { recursive: true });
         } else {
-          throw new Error(`ENOENT: no such file or directory, mkdir '${path}'`);
+          throw new FsError(
+            "ENOENT",
+            `no such file or directory, mkdir '${path}'`,
+          );
         }
       }
     }
@@ -1254,19 +1288,25 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, scandir '${path}'`,
+      );
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, scandir '${path}'`);
     }
     let dirNode: OverlayDirNode | undefined;
     if (result.kind === "found") {
       const node = result.node;
       if (node.type === "whiteout") {
-        throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, scandir '${path}'`,
+        );
       }
       if (node.type !== "directory") {
-        throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
+        throw new FsError("ENOTDIR", `not a directory, scandir '${path}'`);
       }
       dirNode = node;
       // Add entries from the upper layer (with type info); whiteout
@@ -1451,7 +1491,7 @@ export class OverlayFs implements IFileSystem {
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {
       if (options?.force) return;
-      throw new Error(`ENOENT: no such file or directory, rm '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, rm '${path}'`);
     }
 
     // Check if it's a directory
@@ -1468,7 +1508,7 @@ export class OverlayFs implements IFileSystem {
       // Uninspectable — proceed to the whiteout.
     }
     if (nonEmptyDir && !options?.recursive) {
-      throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
+      throw new FsError("ENOTEMPTY", `directory not empty, rm '${path}'`);
     }
 
     // Drop any upper-layer state and, when hiding a real-FS path, leave a
@@ -1507,7 +1547,7 @@ export class OverlayFs implements IFileSystem {
 
     const srcExists = await this.existsInOverlay(srcNorm);
     if (!srcExists) {
-      throw new Error(`ENOENT: no such file or directory, cp '${src}'`);
+      throw new FsError("ENOENT", `no such file or directory, cp '${src}'`);
     }
 
     const srcStat = await this.stat(srcNorm);
@@ -1517,10 +1557,13 @@ export class OverlayFs implements IFileSystem {
       await this.writeFile(destNorm, content);
     } else if (srcStat.isDirectory) {
       if (!options?.recursive) {
-        throw new Error(`EISDIR: is a directory, cp '${src}'`);
+        throw new FsError("EISDIR", `is a directory, cp '${src}'`);
       }
       if (isSameOrDescendantPath(srcNorm, destNorm)) {
-        throw new Error(`EINVAL: cannot copy '${src}' into itself, '${dest}'`);
+        throw new FsError(
+          "EINVAL",
+          `cannot copy '${src}' into itself, '${dest}'`,
+        );
       }
       await this.mkdir(destNorm, { recursive: true });
       const children = await this.readdir(srcNorm);
@@ -1626,7 +1669,7 @@ export class OverlayFs implements IFileSystem {
 
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {
-      throw new Error(`ENOENT: no such file or directory, chmod '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, chmod '${path}'`);
     }
 
     // If in the upper layer, update there
@@ -1684,7 +1727,10 @@ export class OverlayFs implements IFileSystem {
 
   async symlink(target: string, linkPath: string): Promise<void> {
     if (!this.allowSymlinks) {
-      throw new Error(`EPERM: operation not permitted, symlink '${linkPath}'`);
+      throw new FsError(
+        "EPERM",
+        `operation not permitted, symlink '${linkPath}'`,
+      );
     }
     validatePath(linkPath, "symlink");
     this.assertWritable(`symlink '${linkPath}'`);
@@ -1692,7 +1738,7 @@ export class OverlayFs implements IFileSystem {
 
     const exists = await this.existsInOverlay(normalized);
     if (exists) {
-      throw new Error(`EEXIST: file already exists, symlink '${linkPath}'`);
+      throw new FsError("EEXIST", `file already exists, symlink '${linkPath}'`);
     }
 
     this.ensureParentDirs(normalized);
@@ -1720,12 +1766,15 @@ export class OverlayFs implements IFileSystem {
 
     const existingStat = await this.stat(existingNorm);
     if (!existingStat.isFile) {
-      throw new Error(`EPERM: operation not permitted, link '${existingPath}'`);
+      throw new FsError(
+        "EPERM",
+        `operation not permitted, link '${existingPath}'`,
+      );
     }
 
     const newExists = await this.existsInOverlay(newNorm);
     if (newExists) {
-      throw new Error(`EEXIST: file already exists, link '${newPath}'`);
+      throw new FsError("EEXIST", `file already exists, link '${newPath}'`);
     }
 
     // Copy content to new location
@@ -1746,10 +1795,13 @@ export class OverlayFs implements IFileSystem {
 
     const result = this.tree.descend(normalized);
     if (result.kind === "blocked") {
-      throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, readlink '${path}'`,
+      );
     }
     if (result.kind === "notdir") {
-      throw new Error(`ENOTDIR: not a directory, readlink '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, readlink '${path}'`);
     }
     if (result.kind === "found") {
       const entry = result.node;
@@ -1759,7 +1811,7 @@ export class OverlayFs implements IFileSystem {
         );
       }
       if (entry.type !== "symlink") {
-        throw new Error(`EINVAL: invalid argument, readlink '${path}'`);
+        throw new FsError("EINVAL", `invalid argument, readlink '${path}'`);
       }
       return entry.target;
     }
@@ -1770,7 +1822,10 @@ export class OverlayFs implements IFileSystem {
     // Use the canonical path for I/O to close the TOCTOU gap.
     const canonical = this.resolveRealPathParent_(this.toRealPath(normalized));
     if (!canonical) {
-      throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, readlink '${path}'`,
+      );
     }
 
     try {
@@ -1804,7 +1859,7 @@ export class OverlayFs implements IFileSystem {
         );
       }
       if ((e as NodeJS.ErrnoException).code === "EINVAL") {
-        throw new Error(`EINVAL: invalid argument, readlink '${path}'`);
+        throw new FsError("EINVAL", `invalid argument, readlink '${path}'`);
       }
       this.sanitizeError(e, path, "readlink");
     }
@@ -1919,12 +1974,10 @@ export class OverlayFs implements IFileSystem {
                   );
                 }
               } catch (e) {
-                if (
-                  (e as Error).message?.includes("ENOENT") ||
-                  (e as Error).message?.includes("ELOOP")
-                ) {
-                  throw new Error(
-                    `ENOENT: no such file or directory, realpath '${path}'`,
+                if (isFsErrorCode(e, "ENOENT") || isFsErrorCode(e, "ELOOP")) {
+                  throw new FsError(
+                    "ENOENT",
+                    `no such file or directory, realpath '${path}'`,
                   );
                 }
                 this.sanitizeError(e, path, "realpath");
@@ -1942,7 +1995,10 @@ export class OverlayFs implements IFileSystem {
     // Verify the final path exists
     const exists = await this.existsInOverlay(result);
     if (!exists) {
-      throw new Error(`ENOENT: no such file or directory, realpath '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, realpath '${path}'`,
+      );
     }
 
     return result;
@@ -1961,7 +2017,10 @@ export class OverlayFs implements IFileSystem {
 
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {
-      throw new Error(`ENOENT: no such file or directory, utimes '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, utimes '${path}'`,
+      );
     }
 
     // If in the upper layer, update there

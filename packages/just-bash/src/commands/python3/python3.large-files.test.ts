@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { FsError } from "../../fs/fs-error.js";
 import { InMemoryFs } from "../../fs/in-memory-fs/index.js";
 
 // The bridge protocol's data buffer is 8MB; files larger than that are
@@ -97,7 +98,7 @@ except IsADirectoryError:
     class DenyReadFs extends InMemoryFs {
       override async readFileBuffer(path: string): Promise<Uint8Array> {
         if (path === "/secret.txt") {
-          throw new Error("EACCES: permission denied");
+          throw new FsError("EACCES", "permission denied");
         }
         return super.readFileBuffer(path);
       }
@@ -140,6 +141,37 @@ except OSError as e:
     expect(result.stderr).toBe("");
     // Must say "not empty"; must NOT be the EIO(5) fallback.
     expect(result.stdout).toBe("OSError True False\n");
+    expect(result.exitCode).toBe(0);
+  }, 60_000);
+
+  it("honors a structured .code with no message prefix (no prose parsing)", async () => {
+    // Node-style error: code carried structurally, message carries no
+    // "EACCES" text. Substring heuristics cannot see it; only the
+    // structured channel can. Pre-fix this surfaces as the ENOENT lie.
+    class NodeStyleDenyFs extends InMemoryFs {
+      override async readFileBuffer(path: string): Promise<Uint8Array> {
+        if (path === "/node-denied.txt") {
+          throw Object.assign(new Error("go away"), { code: "EACCES" });
+        }
+        return super.readFileBuffer(path);
+      }
+    }
+    const fs = new NodeStyleDenyFs();
+    await fs.writeFile("/node-denied.txt", "x");
+    const env = new Bash({ python: true, fs });
+    const result = await env.exec(
+      `python3 -c "
+try:
+    open('/node-denied.txt').read()
+    print('open succeeded (wrong)')
+except PermissionError:
+    print('PermissionError (honest)')
+except FileNotFoundError:
+    print('FileNotFoundError (the lie)')
+"`,
+    );
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("PermissionError (honest)\n");
     expect(result.exitCode).toBe(0);
   }, 60_000);
 });

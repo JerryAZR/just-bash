@@ -1,3 +1,5 @@
+import { FsError } from "./fs-error.js";
+
 /**
  * Pure path utilities for virtual filesystems.
  *
@@ -67,7 +69,10 @@ export function isSameOrDescendantPath(
  */
 export function validatePath(path: string, operation: string): void {
   if (path.includes("\0")) {
-    throw new Error(`ENOENT: path contains null byte, ${operation} '${path}'`);
+    throw new FsError(
+      "ENOENT",
+      `path contains null byte, ${operation} '${path}'`,
+    );
   }
 }
 

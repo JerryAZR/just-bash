@@ -59,6 +59,12 @@ export {
   textOutput,
   unsafeBytesFromLatin1,
 } from "./encoding.js";
+export {
+  FsError,
+  fsErrorCode,
+  isFsErrorCode,
+  toFsError,
+} from "./fs/fs-error.js";
 export { InMemoryFs } from "./fs/in-memory-fs/index.js";
 export type {
   BufferEncoding,

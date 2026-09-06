@@ -4,6 +4,7 @@ import {
   utf8ByteLength,
 } from "../../encoding.js";
 import { fromBuffer, getEncoding, toBuffer } from "../encoding.js";
+import { FsError } from "../fs-error.js";
 import type {
   BufferEncoding,
   CpOptions,
@@ -338,7 +339,7 @@ export class InMemoryFs implements IFileSystem {
     const entry = this.data.get(resolvedPath);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, open '${path}'`);
     }
     if (entry.type !== "file") {
       throw new Error(
@@ -445,7 +446,7 @@ export class InMemoryFs implements IFileSystem {
     let entry = this.data.get(resolvedPath);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, stat '${path}'`);
     }
 
     // Materialize lazy files to get accurate size
@@ -482,7 +483,7 @@ export class InMemoryFs implements IFileSystem {
     let entry = this.data.get(resolvedPath);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, lstat '${path}'`);
     }
 
     // For symlinks, return symlink info (don't follow)
@@ -629,11 +630,14 @@ export class InMemoryFs implements IFileSystem {
     if (this.data.has(normalized)) {
       const entry = this.data.get(normalized);
       if (entry?.type === "file") {
-        throw new Error(`EEXIST: file already exists, mkdir '${path}'`);
+        throw new FsError("EEXIST", `file already exists, mkdir '${path}'`);
       }
       // Directory already exists
       if (!options?.recursive) {
-        throw new Error(`EEXIST: directory already exists, mkdir '${path}'`);
+        throw new FsError(
+          "EEXIST",
+          `directory already exists, mkdir '${path}'`,
+        );
       }
       return; // With -p, silently succeed if directory exists
     }
@@ -643,7 +647,10 @@ export class InMemoryFs implements IFileSystem {
       if (options?.recursive) {
         this.mkdirSync(parent, { recursive: true });
       } else {
-        throw new Error(`ENOENT: no such file or directory, mkdir '${path}'`);
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, mkdir '${path}'`,
+        );
       }
     }
 
@@ -665,7 +672,10 @@ export class InMemoryFs implements IFileSystem {
     let entry = this.data.get(normalized);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, scandir '${path}'`,
+      );
     }
 
     // Follow symlinks to get to the actual directory
@@ -682,10 +692,13 @@ export class InMemoryFs implements IFileSystem {
     }
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, scandir '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, scandir '${path}'`,
+      );
     }
     if (entry.type !== "directory") {
-      throw new Error(`ENOTDIR: not a directory, scandir '${path}'`);
+      throw new FsError("ENOTDIR", `not a directory, scandir '${path}'`);
     }
 
     const prefix = normalized === "/" ? "/" : `${normalized}/`;
@@ -721,14 +734,14 @@ export class InMemoryFs implements IFileSystem {
 
     if (!entry) {
       if (options?.force) return;
-      throw new Error(`ENOENT: no such file or directory, rm '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, rm '${path}'`);
     }
 
     if (entry.type === "directory") {
       const children = await this.readdir(normalized);
       if (children.length > 0) {
         if (!options?.recursive) {
-          throw new Error(`ENOTEMPTY: directory not empty, rm '${path}'`);
+          throw new FsError("ENOTEMPTY", `directory not empty, rm '${path}'`);
         }
         for (const child of children) {
           const childPath = joinPath(normalized, child);
@@ -748,7 +761,7 @@ export class InMemoryFs implements IFileSystem {
     const srcEntry = this.data.get(srcNorm);
 
     if (!srcEntry) {
-      throw new Error(`ENOENT: no such file or directory, cp '${src}'`);
+      throw new FsError("ENOENT", `no such file or directory, cp '${src}'`);
     }
 
     if (srcEntry.type === "file") {
@@ -775,10 +788,13 @@ export class InMemoryFs implements IFileSystem {
       this.data.set(destNorm, { ...srcEntry });
     } else if (srcEntry.type === "directory") {
       if (!options?.recursive) {
-        throw new Error(`EISDIR: is a directory, cp '${src}'`);
+        throw new FsError("EISDIR", `is a directory, cp '${src}'`);
       }
       if (isSameOrDescendantPath(srcNorm, destNorm)) {
-        throw new Error(`EINVAL: cannot copy '${src}' into itself, '${dest}'`);
+        throw new FsError(
+          "EINVAL",
+          `cannot copy '${src}' into itself, '${dest}'`,
+        );
       }
       await this.mkdir(destNorm, { recursive: true });
       const children = await this.readdir(srcNorm);
@@ -799,13 +815,16 @@ export class InMemoryFs implements IFileSystem {
 
     const source = this.data.get(srcNorm);
     if (!source) {
-      throw new Error(`ENOENT: no such file or directory, mv '${src}'`);
+      throw new FsError("ENOENT", `no such file or directory, mv '${src}'`);
     }
     if (
       source.type === "directory" &&
       isSameOrDescendantPath(srcNorm, destNorm)
     ) {
-      throw new Error(`EINVAL: cannot move '${src}' into itself, '${dest}'`);
+      throw new FsError(
+        "EINVAL",
+        `cannot move '${src}' into itself, '${dest}'`,
+      );
     }
 
     if (source.type === "directory") {
@@ -842,7 +861,7 @@ export class InMemoryFs implements IFileSystem {
     const entry = this.data.get(normalized);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, chmod '${path}'`);
+      throw new FsError("ENOENT", `no such file or directory, chmod '${path}'`);
     }
 
     entry.mode = mode;
@@ -854,7 +873,7 @@ export class InMemoryFs implements IFileSystem {
     const normalized = normalizePath(linkPath);
 
     if (this.data.has(normalized)) {
-      throw new Error(`EEXIST: file already exists, symlink '${linkPath}'`);
+      throw new FsError("EEXIST", `file already exists, symlink '${linkPath}'`);
     }
 
     this.ensureParentDirs(normalized);
@@ -881,11 +900,14 @@ export class InMemoryFs implements IFileSystem {
     }
 
     if (entry.type !== "file") {
-      throw new Error(`EPERM: operation not permitted, link '${existingPath}'`);
+      throw new FsError(
+        "EPERM",
+        `operation not permitted, link '${existingPath}'`,
+      );
     }
 
     if (this.data.has(newNorm)) {
-      throw new Error(`EEXIST: file already exists, link '${newPath}'`);
+      throw new FsError("EEXIST", `file already exists, link '${newPath}'`);
     }
 
     // Materialize lazy files before creating a hard link
@@ -914,11 +936,14 @@ export class InMemoryFs implements IFileSystem {
     const entry = this.data.get(normalized);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, readlink '${path}'`,
+      );
     }
 
     if (entry.type !== "symlink") {
-      throw new Error(`EINVAL: invalid argument, readlink '${path}'`);
+      throw new FsError("EINVAL", `invalid argument, readlink '${path}'`);
     }
 
     return entry.target;
@@ -935,7 +960,10 @@ export class InMemoryFs implements IFileSystem {
 
     // Verify the path exists
     if (!this.data.has(resolved)) {
-      throw new Error(`ENOENT: no such file or directory, realpath '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, realpath '${path}'`,
+      );
     }
 
     return resolved;
@@ -954,7 +982,10 @@ export class InMemoryFs implements IFileSystem {
     const entry = this.data.get(resolved);
 
     if (!entry) {
-      throw new Error(`ENOENT: no such file or directory, utimes '${path}'`);
+      throw new FsError(
+        "ENOENT",
+        `no such file or directory, utimes '${path}'`,
+      );
     }
 
     // Update mtime on the entry

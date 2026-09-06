@@ -1,4 +1,5 @@
 import * as nodePath from "node:path";
+import { FsError } from "./fs-error.js";
 import { InMemoryFs } from "./in-memory-fs/index.js";
 import { MountableFs } from "./mountable-fs/mountable-fs.js";
 import { applyDiffToRealFs, canonicalizeRealPath } from "./overlay-fs/apply.js";
@@ -59,7 +60,7 @@ export interface VfsTemplate {
 
 export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   if (options.mounts.length === 0) {
-    throw new Error("EINVAL: createVfsTemplate needs at least one mount");
+    throw new FsError("EINVAL", "createVfsTemplate needs at least one mount");
   }
   const mounts = options.mounts.map(({ at, root }) => {
     const canonical = canonicalizeRealPath(root);
@@ -122,8 +123,9 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
       ordered.map((f) => {
         const overlays = registry.get(f);
         if (!overlays) {
-          throw new Error(
-            "EINVAL: merge() got a filesystem this template did not fork",
+          throw new FsError(
+            "EINVAL",
+            "merge() got a filesystem this template did not fork",
           );
         }
         return toAbsoluteDiff(overlays);

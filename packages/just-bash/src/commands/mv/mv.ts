@@ -187,7 +187,7 @@ export const mvCommand: RuntimeCommand = {
           throw error;
         }
         const message = getErrorMessage(error);
-        if (message.includes("ENOENT") || message.includes("no such file")) {
+        if (isFsErrorCode(error, "ENOENT")) {
           stderr += `mv: cannot stat '${src}': No such file or directory\n`;
         } else {
           stderr += `mv: cannot move '${src}': ${message}\n`;
@@ -200,6 +200,7 @@ export const mvCommand: RuntimeCommand = {
   },
 };
 
+import { isFsErrorCode } from "../../fs/fs-error.js";
 import type { CommandFuzzInfo } from "../fuzz-flags-types.js";
 
 export const flagsForFuzzing: CommandFuzzInfo = {

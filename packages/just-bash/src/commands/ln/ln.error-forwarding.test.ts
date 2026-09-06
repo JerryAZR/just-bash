@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { FsError } from "../../fs/fs-error.js";
 import { InMemoryFs } from "../../fs/in-memory-fs/in-memory-fs.js";
 import type { IFileSystem } from "../../fs/interface.js";
 
 function withInjectedFsError(
   fs: IFileSystem,
   method: "link" | "symlink",
+  code: string,
   message: string,
 ): IFileSystem {
   return new Proxy(fs, {
     get(target, prop, receiver) {
       if (prop === method) {
         return async () => {
-          throw new Error(message);
+          throw new FsError(code, message);
         };
       }
 
@@ -30,6 +32,7 @@ describe("ln command error forwarding", () => {
     const fs = withInjectedFsError(
       new InMemoryFs({ "/target.txt": "ok\n" }),
       "symlink",
+      "EIO",
       "symlink failed at /Users/attacker/private/secret.py via node:internal/modules/cjs/loader:999",
     );
     const env = new Bash({ fs });
@@ -49,7 +52,8 @@ describe("ln command error forwarding", () => {
     const fs = withInjectedFsError(
       new InMemoryFs({ "/target.txt": "ok\n" }),
       "symlink",
-      "EPERM: operation not permitted, symlink '/link'",
+      "EPERM",
+      "operation not permitted, symlink '/link'",
     );
     const env = new Bash({ fs });
 
@@ -66,7 +70,8 @@ describe("ln command error forwarding", () => {
     const fs = withInjectedFsError(
       new InMemoryFs({ "/dir/file.txt": "ok\n" }),
       "link",
-      "EPERM: operation not permitted, link '/dir'",
+      "EPERM",
+      "operation not permitted, link '/dir'",
     );
     const env = new Bash({ fs });
 
@@ -83,6 +88,7 @@ describe("ln command error forwarding", () => {
     const fs = withInjectedFsError(
       new InMemoryFs({ "/target.txt": "ok\n" }),
       "link",
+      "EIO",
       "link fault near /Users/attacker/workspace at node:internal/process/task_queues:95",
     );
     const env = new Bash({ fs });

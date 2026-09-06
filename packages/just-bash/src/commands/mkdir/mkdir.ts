@@ -47,12 +47,9 @@ export const mkdirCommand: RuntimeCommand = {
         }
       } catch (error) {
         const message = getErrorMessage(error);
-        if (message.includes("ENOENT") || message.includes("no such file")) {
+        if (isFsErrorCode(error, "ENOENT")) {
           stderr += `mkdir: cannot create directory '${dir}': No such file or directory\n`;
-        } else if (
-          message.includes("EEXIST") ||
-          message.includes("already exists")
-        ) {
+        } else if (isFsErrorCode(error, "EEXIST")) {
           stderr += `mkdir: cannot create directory '${dir}': File exists\n`;
         } else {
           stderr += `mkdir: cannot create directory '${dir}': ${sanitizeErrorMessage(message)}\n`;
@@ -65,6 +62,7 @@ export const mkdirCommand: RuntimeCommand = {
   },
 };
 
+import { isFsErrorCode } from "../../fs/fs-error.js";
 import type { CommandFuzzInfo } from "../fuzz-flags-types.js";
 
 export const flagsForFuzzing: CommandFuzzInfo = {

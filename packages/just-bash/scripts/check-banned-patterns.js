@@ -41,6 +41,20 @@ import { fileURLToPath } from "node:url";
 /** @type {BannedPattern[]} */
 const BANNED_PATTERNS = [
   {
+    name: "Errno-prefixed plain Error",
+    // Errno codes must be carried structurally on .code, never embedded
+    // in message prose where consumers re-derive them by string parsing
+    // (the errno-lie class). Matches single- and multi-line literals.
+    pattern: /new Error\(\s*(["'`])E[A-Z0-9]{2,}:/,
+    message:
+      "Errno-style 'ECODE: ...' message prefixes are the legacy error channel.\n" +
+      "Carry the code structurally so consumers never parse prose.",
+    solutions: [
+      'Throw new FsError("ECODE", "message") from src/fs/fs-error.ts',
+      "Attach a .code string property for node-style errors",
+    ],
+  },
+  {
     name: "Record<string, T> variable declaration",
     // Match: const/let/var NAME: Record<string, or NAME = {} as Record<string,
     // This targets actual object creation, not type annotations

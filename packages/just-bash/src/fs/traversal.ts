@@ -4,6 +4,7 @@ import {
   ExecutionLimitError,
 } from "../interpreter/errors.js";
 import type { ExecutionLimits } from "../limits.js";
+import { isFsErrorCode } from "./fs-error.js";
 import type { FsStat, IFileSystem } from "./interface.js";
 import {
   dirname,
@@ -78,8 +79,7 @@ function statIdentity(stat: FsStat): string | undefined {
 }
 
 function isMissingPathError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("ENOENT") || message.includes("no such file");
+  return isFsErrorCode(error, "ENOENT");
 }
 
 /**

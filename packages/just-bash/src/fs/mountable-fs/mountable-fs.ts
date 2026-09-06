@@ -1,4 +1,5 @@
 import { type ByteString, readBytesFrom } from "../../encoding.js";
+import { FsError, isFsErrorCode } from "../fs-error.js";
 import { InMemoryFs } from "../in-memory-fs/in-memory-fs.js";
 import type {
   BufferEncoding,
@@ -401,7 +402,7 @@ export class MountableFs implements IFileSystem {
       if (options?.recursive) {
         return; // Silently succeed like mkdir -p
       }
-      throw new Error(`EEXIST: directory already exists, mkdir '${path}'`);
+      throw new FsError("EEXIST", `directory already exists, mkdir '${path}'`);
     }
 
     // Check if this would be a parent of a mount point
@@ -429,10 +430,7 @@ export class MountableFs implements IFileSystem {
       }
     } catch (err) {
       // Path might not exist in base FS if only mount points are there
-      const code = (err as { code?: string }).code;
-      const message = (err as { message?: string }).message || "";
-
-      if (code !== "ENOENT" && !message.includes("ENOENT")) {
+      if (!isFsErrorCode(err, "ENOENT")) {
         throw err;
       }
       // Save error to throw later if no mount points provide entries
@@ -458,13 +456,16 @@ export class MountableFs implements IFileSystem {
 
     // Cannot remove mount points
     if (this.mounts.has(normalized)) {
-      throw new Error(`EBUSY: mount point, cannot remove '${path}'`);
+      throw new FsError("EBUSY", `mount point, cannot remove '${path}'`);
     }
 
     // Check if this contains mount points
     const childMounts = this.getChildMountPoints(normalized);
     if (childMounts.length > 0) {
-      throw new Error(`EBUSY: contains mount points, cannot remove '${path}'`);
+      throw new FsError(
+        "EBUSY",
+        `contains mount points, cannot remove '${path}'`,
+      );
     }
 
     const { fs, relativePath } = this.routePath(path);
@@ -474,7 +475,10 @@ export class MountableFs implements IFileSystem {
   async cp(src: string, dest: string, options?: CpOptions): Promise<void> {
     const srcStat = await this.stat(src);
     if (srcStat.isDirectory && isSameOrDescendantPath(src, dest)) {
-      throw new Error(`EINVAL: cannot copy '${src}' into itself, '${dest}'`);
+      throw new FsError(
+        "EINVAL",
+        `cannot copy '${src}' into itself, '${dest}'`,
+      );
     }
     const srcRoute = this.routePath(src);
     const destRoute = this.routePath(dest);
@@ -496,12 +500,15 @@ export class MountableFs implements IFileSystem {
     const normalized = normalizePath(src);
     const srcStat = await this.stat(src);
     if (srcStat.isDirectory && isSameOrDescendantPath(src, dest)) {
-      throw new Error(`EINVAL: cannot move '${src}' into itself, '${dest}'`);
+      throw new FsError(
+        "EINVAL",
+        `cannot move '${src}' into itself, '${dest}'`,
+      );
     }
 
     // Cannot move mount points
     if (this.mounts.has(normalized)) {
-      throw new Error(`EBUSY: mount point, cannot move '${src}'`);
+      throw new FsError("EBUSY", `mount point, cannot move '${src}'`);
     }
 
     const srcRoute = this.routePath(src);

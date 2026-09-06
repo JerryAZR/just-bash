@@ -379,24 +379,11 @@ function createHOSTFS(
           return ERRNO_CODES.EIO;
       }
     }
-    const msg =
-      (e as Error)?.message?.toLowerCase() ||
-      (typeof e === "string" ? e.toLowerCase() : "");
-    let code = ERRNO_CODES.EIO;
-    if (msg.includes("no such file") || msg.includes("not found")) {
-      code = ERRNO_CODES.ENOENT;
-    } else if (msg.includes("is a directory")) {
-      code = ERRNO_CODES.EISDIR;
-    } else if (msg.includes("not a directory")) {
-      code = ERRNO_CODES.ENOTDIR;
-    } else if (msg.includes("already exists")) {
-      code = ERRNO_CODES.EEXIST;
-    } else if (msg.includes("permission")) {
-      code = ERRNO_CODES.EACCES;
-    } else if (msg.includes("not empty")) {
-      code = ERRNO_CODES.ENOTEMPTY;
-    }
-    return code;
+    // No structured code: honest unknown. Every backend op failure
+    // carries the bridge's numeric code (mapped above); anything else
+    // is not an fs error we can classify, and guessing a specific
+    // errno from prose is the lie class this function used to have.
+    return ERRNO_CODES.EIO;
   }
 
   function tryFSOperation<T>(f: () => T): T {

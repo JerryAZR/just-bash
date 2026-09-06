@@ -122,8 +122,7 @@ export const lnCommand: RuntimeCommand = {
         await ctx.fs.link(targetPath, linkPath);
       }
     } catch (e) {
-      const err = e as Error;
-      if (err.message.includes("EPERM")) {
+      if (isFsErrorCode(e, "EPERM")) {
         // Only `link` reports EPERM for a directory. `symlink` reports it on a
         // filesystem that does not allow symlinks at all, where naming a hard
         // link and a directory describes neither the operation nor the target.
@@ -135,7 +134,13 @@ export const lnCommand: RuntimeCommand = {
           exitCode: 1,
         };
       }
-      const message = sanitizeErrorMessage(err.message);
+      const message = sanitizeErrorMessage(
+        e instanceof FsError
+          ? e.bareMessage
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
       return { stdout: "", stderr: `ln: ${message}\n`, exitCode: 1 };
     }
 
@@ -147,6 +152,7 @@ export const lnCommand: RuntimeCommand = {
   },
 };
 
+import { FsError, isFsErrorCode } from "../../fs/fs-error.js";
 import type { CommandFuzzInfo } from "../fuzz-flags-types.js";
 
 export const flagsForFuzzing: CommandFuzzInfo = {

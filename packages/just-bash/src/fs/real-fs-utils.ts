@@ -20,6 +20,8 @@ export {
   validatePath,
 } from "./path-utils.js";
 
+import { FsError } from "./fs-error.js";
+
 /**
  * Check whether `resolved` is equal to, or a child of, `canonicalRoot`.
  * Uses a boundary-safe prefix check (appends `/`) so that `/data` does not
@@ -262,7 +264,7 @@ export function sanitizeFsError(
     }
   }
   const code = err.code || "EIO";
-  throw new Error(`${code}: ${operation} '${virtualPath}'`);
+  throw new FsError(code, `${operation} '${virtualPath}'`);
 }
 
 /**

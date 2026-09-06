@@ -4,6 +4,7 @@ import {
   ExecutionLimitError,
 } from "../interpreter/errors.js";
 import { resolveLimits } from "../limits.js";
+import { FsError } from "./fs-error.js";
 import { InMemoryFs } from "./in-memory-fs/in-memory-fs.js";
 import type { FsStat } from "./interface.js";
 import {
@@ -29,7 +30,7 @@ class IdentitylessFs extends InMemoryFs {
 
 class NoRealpathFs extends InMemoryFs {
   override async realpath(_path: string): Promise<string> {
-    throw new Error("ENOTSUP: realpath unavailable");
+    throw new FsError("ENOTSUP", "realpath unavailable");
   }
 }
 

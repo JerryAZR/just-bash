@@ -19,6 +19,7 @@ import {
   type QuickJSRuntime,
   type QuickJSWASMModule,
 } from "quickjs-emscripten";
+import { FsError } from "../../fs/fs-error.js";
 import {
   WorkerDefenseInDepth,
   type WorkerDefenseStats,
@@ -992,7 +993,7 @@ function setupContext(
   _fs.promises.unlink = _fs.promises.rm;
   _fs.promises.rmdir = _fs.promises.rm;
   _fs.promises.access = function(p) {
-    return orig.exists(p) ? Promise.resolve() : Promise.reject(new Error('ENOENT: no such file or directory: ' + p));
+    return orig.exists(p) ? Promise.resolve() : Promise.reject(new FsError('ENOENT', 'no such file or directory: ' + p));
   };
 
   // process enhancements

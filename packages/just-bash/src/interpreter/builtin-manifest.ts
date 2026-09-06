@@ -134,6 +134,8 @@ export const UNIMPLEMENTED_BUILTIN_NAMES: ReadonlySet<string> = new Set(
 
 /** Widened view for string-keyed lookups (the literal manifest type is
  * precise for the mapped-type coverage check). */
+// @banned-pattern-ignore: read-only view; the only accessor (builtinPhase)
+// guards with Object.hasOwn before indexing
 const manifestView: Record<string, BuiltinManifestEntry> = BUILTIN_MANIFEST;
 
 /** Dispatch order for a handler name (undefined for non-handlers). */

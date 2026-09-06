@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
+import { FsError } from "../fs-error.js";
 import type { OverlayWrite } from "./overlay-fs.js";
 
 /**
@@ -77,7 +78,7 @@ export function applyDiffToRealFs(diff: {
   // passes every naive prefix check).
   for (const p of [...diff.deletions, ...diff.writes.map((w) => w.path)]) {
     if (nodePath.resolve(p) !== p) {
-      throw new Error(`EINVAL: change-set path is not normalized: '${p}'`);
+      throw new FsError("EINVAL", `change-set path is not normalized: '${p}'`);
     }
   }
   const deletions = [...diff.deletions].sort(

@@ -93,11 +93,16 @@ describe("createVfsTemplate", () => {
       ).toBe(`${name}\n`);
     }
     // The /tmp contract: shared scratch saw every fork's appends, and
-    // all three survive (InMemoryFs appends are atomic).
+    // all three survive (InMemoryFs appends are atomic). ORDER is the
+    // scheduler's, not ours — assert the multiset, not the sequence.
     const fresh = tpl.fork();
-    expect(await fresh.readFile("/tmp/log.txt")).toBe(
-      "shared-one\nshared-two\nshared-three\n",
-    );
+    const lines = (await fresh.readFile("/tmp/log.txt")).split("\n");
+    expect(lines.sort()).toEqual([
+      "",
+      "shared-one",
+      "shared-three",
+      "shared-two",
+    ]);
   });
 
   it("apply rejects entries outside every registered root", () => {
