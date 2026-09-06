@@ -186,7 +186,6 @@ describe("BridgeHandler stop() channel isolation", () => {
 
   it("a cancelled wait ends the run without a timeout record", async () => {
     const shared = createSharedBuffer();
-    const protocol = new ProtocolBuffer(shared);
     const handler = new BridgeHandler(
       shared,
       new InMemoryFs(),
