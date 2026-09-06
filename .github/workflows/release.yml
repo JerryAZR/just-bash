@@ -12,9 +12,19 @@ name: Release
 # npm-side setting is updated to match. Fork setup: bind the publisher for
 # `@jerryan/just-bash` to this repo and this filename on npm.com.
 #
-# A guard job skips the whole workflow when no changesets are queued — the
-# per-push workflows already run the full gate, so running it again here on
-# every push would only double CI minutes.
+# A guard job skips the whole workflow when there is nothing to do — the
+# per-push workflows already run the full gate, so running it again here
+# on every push would only double CI minutes. The guard triggers the
+# release job in either mode:
+#   PR mode:      changesets are queued on main (open/update the release PR)
+#   publish mode: no changesets queued AND package.json's version has no
+#                 `@jerryan/just-bash@<version>` tag yet (a release PR was
+#                 just merged; changesets/action publishes and creates the
+#                 tag on success). The tag doubles as the publish receipt.
+# Residual hazard, accepted and documented: a push landing between a
+# release-PR merge and the publish's tag creation would re-trigger publish
+# from newer content. Keep main quiet during a release, or push the tag
+# promptly after a manual publish.
 #
 # See https://docs.npmjs.com/trusted-publishers for the publisher binding.
 
@@ -30,10 +40,12 @@ jobs:
     permissions: {}
     outputs:
       queued: ${{ steps.check.outputs.queued }}
+      published: ${{ steps.check.outputs.published }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - id: check
         run: |
           if find .changeset -name '*.md' ! -name README.md | grep -q .; then
@@ -41,10 +53,17 @@ jobs:
           else
             echo "queued=false" >> "$GITHUB_OUTPUT"
           fi
+          version=$(node -p "require('./packages/just-bash/package.json').version")
+          tag="@jerryan/just-bash@${version}"
+          if git tag -l "$tag" | grep -qxF "$tag"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
 
   release:
     needs: guard
-    if: needs.guard.outputs.queued == 'true'
+    if: needs.guard.outputs.queued == 'true' || needs.guard.outputs.published == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write
