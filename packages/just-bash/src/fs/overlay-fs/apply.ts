@@ -52,3 +52,28 @@ export function applyWriteToRealFs(
   }
   fs.utimesSync(path, write.mtime, write.mtime);
 }
+
+/**
+ * Apply a change set with real absolute paths to the real filesystem:
+ * deletions first (deepest path first, so subtrees go before their
+ * parents), then writes (shallowest first, so explicit directory
+ * entries land before their children). Standalone counterpart of
+ * AgentSandbox.applyChanges for the fork model — no overlay instance
+ * is involved and nothing is dropped; the caller owns the overlays'
+ * lifecycle (typically: discard after diff()).
+ */
+export function applyDiffToRealFs(diff: {
+  writes: OverlayWrite[];
+  deletions: string[];
+}): void {
+  const deletions = [...diff.deletions].sort(
+    (a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0),
+  );
+  for (const target of deletions) removeFromRealFs(target);
+  const writes = [...diff.writes].sort(
+    (a, b) =>
+      a.path.length - b.path.length ||
+      (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+  );
+  for (const { path, ...write } of writes) applyWriteToRealFs(path, write);
+}
