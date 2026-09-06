@@ -95,6 +95,12 @@ export {
   ReadWriteFs,
   type ReadWriteFsOptions,
 } from "./fs/read-write-fs/index.js";
+export {
+  createVfsTemplate,
+  type VfsTemplate,
+  type VfsTemplateMount,
+  type VfsTemplateOptions,
+} from "./fs/vfs-template.js";
 export type {
   AllowedUrl,
   AllowedUrlEntry,
