@@ -144,6 +144,7 @@ export class BridgeHandler {
 
   stop(): void {
     this.running = false;
+    this.lastResult = null;
     // Wake a handler blocked before the worker's first bridge operation.
     this.protocol.setStatus(Status.READY);
     this.protocol.notify();
@@ -169,9 +170,6 @@ export class BridgeHandler {
           break;
         case OpCode.MKDIR:
           await this.handleMkdir();
-          break;
-        case OpCode.READ_FILE_RANGE:
-          await this.handleReadFileRange();
           break;
         case OpCode.READ_RESULT_RANGE:
           this.handleReadResultRange();
@@ -268,19 +266,6 @@ export class BridgeHandler {
     try {
       const content = await this.fs.readFileBuffer(path);
       this.publishResult(content);
-    } catch (e) {
-      this.setErrorFromException(e);
-    }
-  }
-
-  private async handleReadFileRange(): Promise<void> {
-    const path = this.resolvePath(this.protocol.getPath());
-    const offset = this.protocol.getFlags();
-    const length = this.protocol.getMode();
-    try {
-      const content = await this.fs.readFileBuffer(path);
-      this.protocol.setResult(content.subarray(offset, offset + length));
-      this.protocol.setStatus(Status.SUCCESS);
     } catch (e) {
       this.setErrorFromException(e);
     }
@@ -723,6 +708,11 @@ export class BridgeHandler {
       lowerMsg.includes("enotdir")
     ) {
       errorCode = ErrorCode.NOT_DIRECTORY;
+    } else if (
+      lowerMsg.includes("not empty") ||
+      lowerMsg.includes("enotempty")
+    ) {
+      errorCode = ErrorCode.NOT_EMPTY;
     } else if (
       lowerMsg.includes("already exists") ||
       lowerMsg.includes("eexist")

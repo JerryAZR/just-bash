@@ -37,10 +37,10 @@ export const OpCode = {
   REALPATH: 13,
   RENAME: 14,
   COPY_FILE: 15,
-  // Ranged variants for payloads larger than the data buffer. FLAGS
-  // carries the file offset (uint32); MODE carries the length
-  // (READ_FILE_RANGE only — a write's length is its DATA_LENGTH).
-  READ_FILE_RANGE: 16,
+  // Ranged variant for write payloads larger than the data buffer.
+  // FLAGS carries the file offset (uint32); the chunk length is its
+  // DATA_LENGTH. (Reads use plain READ_FILE plus the generic
+  // READ_RESULT_RANGE assembly; only the write direction needs this.)
   WRITE_FILE_RANGE: 17,
   // Fetch the next slice of an oversized result (any op). The host
   // publishes the first DATA_BUFFER bytes with the FULL length in
@@ -84,6 +84,7 @@ export const ErrorCode = {
   TIMEOUT: 8,
   NETWORK_ERROR: 9,
   NETWORK_NOT_CONFIGURED: 10,
+  NOT_EMPTY: 11,
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -106,9 +107,10 @@ const Offset = {
 export const Size = {
   CONTROL_REGION: 32,
   PATH_BUFFER: 4096,
-  // 8MB limit for FS read/write, HTTP responses, and tool invocation results.
-  // Sized to handle typical OpenAPI/GraphQL responses (paginated lists, batch queries).
-  // Still well under the 64MB QuickJS memory limit per execution.
+  // 8MB transfer CHUNK size — not a semantic cap. Results larger than
+  // this are assembled transparently (READ_RESULT_RANGE), and large
+  // writes stream as WRITE_FILE_RANGE chunks. Sized to keep ordinary
+  // ops single-transfer while bounding per-transfer copies.
   DATA_BUFFER: 8388608,
   TOTAL: 8392736, // 32 + 4096 + 8MB
 } as const;
@@ -289,6 +291,11 @@ export class ProtocolBuffer {
    * READ_RESULT_RANGE ops (served from the host's retained buffer).
    */
   setResultPrefix(data: Uint8Array): void {
+    if (data.length > 0x7fffffff) {
+      // RESULT_LENGTH is int32; an overflowing length would wrap
+      // negative and surface downstream as an empty SUCCESS.
+      throw new Error(`Result too large: ${data.length} exceeds int32`);
+    }
     const n = Math.min(data.length, Size.DATA_BUFFER);
     this.uint8View.set(data.subarray(0, n), Offset.DATA_BUFFER);
     this.setResultLength(data.length);

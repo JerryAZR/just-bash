@@ -35,6 +35,12 @@ export function applyWriteToRealFs(
 ): void {
   if (write.nodeType === "directory") {
     fs.mkdirSync(path, { recursive: true });
+    // Directories carry mode/mtime too (a chmod 700 dir in the sandbox
+    // must not vanish at apply). Mode bits are advisory on Windows.
+    if (process.platform !== "win32") {
+      fs.chmodSync(path, write.mode);
+    }
+    fs.utimesSync(path, write.mtime, write.mtime);
     return;
   }
   fs.mkdirSync(nodePath.dirname(path), { recursive: true });
@@ -66,6 +72,14 @@ export function applyDiffToRealFs(diff: {
   writes: OverlayWrite[];
   deletions: string[];
 }): void {
+  // Reject non-normalized input: "..", ".", or duplicate separators
+  // would silently escape the caller's intent (e.g. "/root/../x"
+  // passes every naive prefix check).
+  for (const p of [...diff.deletions, ...diff.writes.map((w) => w.path)]) {
+    if (nodePath.resolve(p) !== p) {
+      throw new Error(`EINVAL: change-set path is not normalized: '${p}'`);
+    }
+  }
   const deletions = [...diff.deletions].sort(
     (a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0),
   );

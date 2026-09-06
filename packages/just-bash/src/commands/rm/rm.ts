@@ -60,8 +60,10 @@ export const rmCommand: RuntimeCommand = {
         }
       } catch (error) {
         const message = getErrorMessage(error);
-        const isEnoent =
-          message.includes("ENOENT") || message.includes("no such file");
+        // Fs errors are "ECODE: ..." prefixed; anchor the match so a
+        // file named e.g. "ENOENT-notes" can't smuggle a real failure
+        // past -f.
+        const isEnoent = message.startsWith("ENOENT");
         // GNU rm -f suppresses only "no such file" errors; everything
         // else (mount-point EBUSY, permission, not-empty, ...) is
         // reported even under force.

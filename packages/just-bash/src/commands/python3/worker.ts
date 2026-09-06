@@ -371,6 +371,8 @@ function createHOSTFS(
           return ERRNO_CODES.EEXIST;
         case BridgeErrorCode.PERMISSION_DENIED:
           return ERRNO_CODES.EACCES;
+        case BridgeErrorCode.NOT_EMPTY:
+          return ERRNO_CODES.ENOTEMPTY;
         case BridgeErrorCode.INVALID_PATH:
           return ERRNO_CODES.EINVAL;
         default:

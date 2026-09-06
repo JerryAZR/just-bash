@@ -63,8 +63,18 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   }
   const mounts = options.mounts.map(({ at, root }) => {
     const canonical = canonicalizeRealPath(root);
-    return { at, root: canonical };
+    const normalizedAt = at.startsWith("/") ? at : `/${at}`;
+    return { at: normalizedAt.replace(/\/+$/, "") || "/", root: canonical };
   });
+  const seenAts = new Set<string>();
+  for (const { at } of mounts) {
+    if (seenAts.has(at)) {
+      throw new Error(
+        `EINVAL: duplicate mount point '${at}' in createVfsTemplate`,
+      );
+    }
+    seenAts.add(at);
+  }
 
   const scratch = new InMemoryFs();
   const registry = new Map<MountableFs, Map<string, OverlayFs>>();
@@ -134,10 +144,46 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
           `EINVAL: change-set entry outside every template root: '${target}'`,
         );
       }
+      // Symlink containment: the canonical location of the entry (its
+      // deepest existing ancestor, realpath'd, plus the remainder) must
+      // also be inside a registered root — otherwise a symlinked
+      // directory inside a root would redirect the privileged write
+      // outside it.
+      const canonicalTarget = canonicalizeDeepest_(target);
+      const canonInside = mounts.some(
+        ({ root }) =>
+          canonicalTarget === root ||
+          canonicalTarget.startsWith(root + nodePath.sep),
+      );
+      if (!canonInside) {
+        throw new Error(
+          `EINVAL: change-set entry escapes its root through a symlink: '${target}'`,
+        );
+      }
     }
     applyDiffToRealFs(merged);
     registry.clear();
   };
 
   return { fork, merge, apply };
+}
+
+/** Canonical location of a path: realpath of the deepest existing
+ * ancestor plus the not-yet-existing remainder. */
+function canonicalizeDeepest_(target: string): string {
+  let current = target;
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      const canonical = canonicalizeRealPath(current);
+      return rest.length === 0
+        ? canonical
+        : nodePath.join(canonical, ...rest.reverse());
+    } catch {
+      const parent = nodePath.dirname(current);
+      if (parent === current) return target; // unreachable; defensive
+      rest.push(nodePath.basename(current));
+      current = parent;
+    }
+  }
 }

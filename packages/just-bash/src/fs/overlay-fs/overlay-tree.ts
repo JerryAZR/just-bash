@@ -166,6 +166,7 @@ function freshDirNode(): OverlayDirNode {
   return {
     type: "directory",
     children: new Map(),
+    changedAt: Date.now(),
     mode: DEFAULT_DIR_MODE,
     mtime: new Date(),
   };
@@ -274,7 +275,12 @@ export class OverlayTree {
     if (lower) {
       for (const childName of lower) {
         if (!dir.children.has(childName)) {
-          dir.children.set(childName, { type: "whiteout" });
+          // Resurrection whiteouts carry the deletion's time: they
+          // compete in merges against writes from other forks.
+          dir.children.set(childName, {
+            type: "whiteout",
+            changedAt: dir.changedAt,
+          });
         }
       }
     }

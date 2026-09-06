@@ -486,12 +486,11 @@ function setupContext(
   context.setProp(fsObj, "readFileBuffer", readFileBufferFn);
   readFileBufferFn.dispose();
 
-  // Marshal guest write data to bytes. Strings encode as UTF-8;
-  // ArrayBuffer views (Uint8Array, Buffer, DataView) contribute their
-  // raw bytes via the underlying buffer plus the view window. Anything
-  // else falls back to the legacy string coercion. Previously every
-  // value went through getString(), which silently wrote a Uint8Array
-  // as its comma-joined text form ("68,68,68,...") — data corruption.
+  // Marshal guest write data to bytes. Accepted types match Node:
+  // string (UTF-8 encoded), Buffer, TypedArray, and DataView (raw
+  // bytes via buffer + view window). Everything else is a TypeError —
+  // never the legacy lossy string coercion that silently wrote a
+  // Uint8Array as comma-joined text ("68,68,68,...").
   const marshalWriteData = (dataHandle: QuickJSHandle): Uint8Array => {
     if (context.typeof(dataHandle) === "string") {
       return new TextEncoder().encode(context.getString(dataHandle));
@@ -499,11 +498,11 @@ function setupContext(
     if (context.typeof(dataHandle) === "object") {
       const bufferHandle = context.getProp(dataHandle, "buffer");
       if (bufferHandle && context.typeof(bufferHandle) === "object") {
+        const offsetHandle = context.getProp(dataHandle, "byteOffset");
+        const lengthHandle = context.getProp(dataHandle, "byteLength");
         try {
           const raw = context.getArrayBuffer(bufferHandle).value;
           const view = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-          const offsetHandle = context.getProp(dataHandle, "byteOffset");
-          const lengthHandle = context.getProp(dataHandle, "byteLength");
           const offset =
             offsetHandle && context.typeof(offsetHandle) === "number"
               ? context.getNumber(offsetHandle)
@@ -512,23 +511,28 @@ function setupContext(
             lengthHandle && context.typeof(lengthHandle) === "number"
               ? context.getNumber(lengthHandle)
               : view.byteLength - offset;
+          if (offset < 0 || length < 0 || offset + length > view.byteLength) {
+            throw new TypeError("writeFile data has an invalid byte window");
+          }
+          return view.slice(offset, offset + length);
+        } finally {
+          bufferHandle.dispose();
           offsetHandle?.dispose();
           lengthHandle?.dispose();
-          bufferHandle.dispose();
-          return view.subarray(offset, offset + length);
-        } catch {
-          bufferHandle.dispose();
-        }
-      } else {
-        bufferHandle?.dispose();
-        try {
-          return new Uint8Array(context.getArrayBuffer(dataHandle).value);
-        } catch {
-          // fall through to legacy coercion
         }
       }
+      bufferHandle?.dispose();
+      // Plain ArrayBuffer.
+      try {
+        const raw = context.getArrayBuffer(dataHandle).value;
+        return raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      } catch {
+        // fall through to the TypeError below
+      }
     }
-    return new TextEncoder().encode(context.getString(dataHandle));
+    throw new TypeError(
+      "writeFile data must be a string, Buffer, TypedArray, or DataView",
+    );
   };
 
   const writeFileFn = context.newFunction(

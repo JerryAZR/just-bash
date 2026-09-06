@@ -101,7 +101,12 @@ export class SyncBackend {
         const chunk = slice.result ?? new Uint8Array(0);
         content.set(chunk, offset);
         offset += chunk.length;
-        if (chunk.length === 0) break; // defensive: no progress
+        if (chunk.length === 0) {
+          // Unreachable with the current honest host; if it ever fires,
+          // the tail would be zeros — fail hard rather than return a
+          // corrupt success.
+          throw this.opError_("bridge returned an empty result slice", slice);
+        }
       }
       return { success: true, result: content };
     }
@@ -132,36 +137,14 @@ export class SyncBackend {
   }
 
   readFile(path: string): Uint8Array {
-    // Files larger than the transport buffer are read in ranged chunks;
-    // the caller still receives the whole file as one Uint8Array.
-    const size = this.stat(path).size;
-    if (size <= Size.DATA_BUFFER) {
-      const result = this.execSync(OpCode.READ_FILE, path);
-      if (!result.success) {
-        throw this.opError_("Failed to read file", result);
-      }
-      return result.result ?? new Uint8Array(0);
+    // Any size works: execSync assembles oversized results from the
+    // host's retained buffer (a consistent snapshot), so there is no
+    // transport ceiling and no stat round-trip.
+    const result = this.execSync(OpCode.READ_FILE, path);
+    if (!result.success) {
+      throw this.opError_("Failed to read file", result);
     }
-    const content = new Uint8Array(size);
-    let offset = 0;
-    while (offset < size) {
-      const length = Math.min(Size.DATA_BUFFER, size - offset);
-      const result = this.execSync(
-        OpCode.READ_FILE_RANGE,
-        path,
-        undefined,
-        offset,
-        length,
-      );
-      if (!result.success) {
-        throw this.opError_("Failed to read file", result);
-      }
-      const chunk = result.result ?? new Uint8Array(0);
-      content.set(chunk, offset);
-      offset += chunk.length;
-      if (chunk.length === 0) break; // defensive: no progress
-    }
-    return content;
+    return result.result ?? new Uint8Array(0);
   }
 
   writeFile(path: string, data: Uint8Array): void {

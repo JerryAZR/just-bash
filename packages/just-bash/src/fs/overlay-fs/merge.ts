@@ -25,6 +25,11 @@ import type { OverlayDiff, OverlayWrite } from "./overlay-fs.js";
 export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   type Entry = {
     path: string;
+    /** Slash-normalized form of `path` — the ONLY form used for identity
+     * and prefix comparisons, so merges work identically when callers
+     * join paths with platform separators (nodePath.join on Windows
+     * produces backslashes). Output always uses the original `path`. */
+    key: string;
     kind: "write" | "delete";
     changedAt: number;
     order: number;
@@ -32,21 +37,24 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
     scaffolding?: boolean;
     write?: OverlayWrite;
   };
+  const keyOf = (p: string) => p.replace(/\\/g, "/");
 
   const entries: Entry[] = [];
   let order = 0;
   for (const diff of diffs) {
-    const paths = new Set(diff.writes.map((w) => w.path));
-    const hasDescendant = (p: string) => {
-      const prefix = `${p}/`;
-      for (const other of paths) {
+    const keys = new Set(diff.writes.map((w) => keyOf(w.path)));
+    const hasDescendant = (key: string) => {
+      const prefix = `${key}/`;
+      for (const other of keys) {
         if (other.startsWith(prefix)) return true;
       }
       return false;
     };
     for (const write of diff.writes) {
+      const key = keyOf(write.path);
       entries.push({
         path: write.path,
+        key,
         kind: "write",
         changedAt: write.changedAt ?? 0,
         order: order++,
@@ -54,14 +62,14 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
         // it must never outvote a deletion at its own path (see the
         // resurrection semantics in the design doc). A dir entry with no
         // same-diff descendants is an explicit mkdir and competes fully.
-        scaffolding:
-          write.nodeType === "directory" && hasDescendant(write.path),
+        scaffolding: write.nodeType === "directory" && hasDescendant(key),
         write,
       });
     }
     for (let i = 0; i < diff.deletions.length; i++) {
       entries.push({
         path: diff.deletions[i],
+        key: keyOf(diff.deletions[i]),
         kind: "delete",
         changedAt: diff.deletionChangedAt?.[i] ?? 0,
         order: order++,
@@ -76,30 +84,58 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   // is ignored in any competition where a whiteout participates.
   const byPath = new Map<string, Entry[]>();
   for (const e of entries) {
-    const list = byPath.get(e.path);
+    const list = byPath.get(e.key);
     if (list) list.push(e);
-    else byPath.set(e.path, [e]);
+    else byPath.set(e.key, [e]);
   }
   const winners = new Map<string, Entry>();
-  for (const [path, candidates] of byPath) {
+  for (const [key, candidates] of byPath) {
     candidates.sort(later);
     const hasWhiteout = candidates.some((c) => c.kind === "delete");
     for (let i = candidates.length - 1; i >= 0; i--) {
       const c = candidates[i];
       if (hasWhiteout && c.kind === "write" && c.scaffolding) continue;
-      winners.set(path, c);
+      // A metadataOnly winner absorbs into the latest content write
+      // when one exists: the chmod/utimes contributes mode/mtime (and
+      // the ordering stamp), never discards content.
+      if (c.kind === "write" && c.write?.metadataOnly) {
+        const content = candidates
+          .slice(0, i)
+          .reverse()
+          .find(
+            (e) =>
+              e.kind === "write" &&
+              e.write &&
+              !e.write.metadataOnly &&
+              e.write.nodeType === "file",
+          );
+        if (content?.write) {
+          winners.set(key, {
+            ...content,
+            changedAt: c.changedAt,
+            write: {
+              ...content.write,
+              mode: c.write.mode,
+              mtime: c.write.mtime,
+              changedAt: c.changedAt,
+            },
+          });
+          break;
+        }
+      }
+      winners.set(key, c);
       break;
     }
   }
 
   // Subtree consistency, path-sorted so parents are considered first.
   const ordered = [...winners.values()].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+    a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
   );
   const suppressed = new Set<Entry>();
   for (const w of ordered) {
     if (suppressed.has(w)) continue;
-    const prefix = `${w.path}/`;
+    const prefix = `${w.key}/`;
     const isWhiteout = w.kind === "delete";
     const isLeaf =
       w.kind === "write" &&
@@ -107,7 +143,7 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
     if (!isWhiteout && !isLeaf) continue;
     for (const other of ordered) {
       if (other === w || suppressed.has(other)) continue;
-      if (!other.path.startsWith(prefix)) continue;
+      if (!other.key.startsWith(prefix)) continue;
       // A whiteout suppresses only strictly-earlier subtree entries —
       // later ones resurrect the path. A file/symlink suppresses every
       // descendant: files cannot have children.
@@ -117,11 +153,16 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   }
 
   const writes: OverlayWrite[] = [];
-  const survivingDeletions: { path: string; changedAt: number }[] = [];
+  const survivingDeletions: { path: string; key: string; changedAt: number }[] =
+    [];
   for (const w of ordered) {
     if (suppressed.has(w)) continue;
     if (w.kind === "delete") {
-      survivingDeletions.push({ path: w.path, changedAt: w.changedAt });
+      survivingDeletions.push({
+        path: w.path,
+        key: w.key,
+        changedAt: w.changedAt,
+      });
     } else if (w.write) {
       writes.push(w.write);
     }
@@ -130,9 +171,7 @@ export function mergeDiffs(diffs: OverlayDiff[]): OverlayDiff {
   // (applying the ancestor covers it) — drop it regardless of time.
   const kept = survivingDeletions.filter(
     (d) =>
-      !survivingDeletions.some(
-        (a) => a !== d && d.path.startsWith(`${a.path}/`),
-      ),
+      !survivingDeletions.some((a) => a !== d && d.key.startsWith(`${a.key}/`)),
   );
   writes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return {

@@ -68,27 +68,20 @@ describe("ranged bridge ops", () => {
       });
       expect(w1.status).toBe(Status.SUCCESS);
 
-      const r0 = await sendOp(protocol, OpCode.READ_FILE_RANGE, {
-        path: "/big.bin",
-        flags: 0,
-        mode: 100,
-      });
-      expect(r0.status).toBe(Status.SUCCESS);
-      expect(r0.result.length).toBe(100);
-      expect(r0.result[0]).toBe(65);
-      const r1 = await sendOp(protocol, OpCode.READ_FILE_RANGE, {
-        path: "/big.bin",
-        flags: 100,
-        mode: 50,
-      });
-      expect(r1.status).toBe(Status.SUCCESS);
-      expect(r1.result.length).toBe(50);
-      expect(r1.result[0]).toBe(66);
-
       const full = await sendOp(protocol, OpCode.READ_FILE, {
         path: "/big.bin",
       });
+      expect(full.status).toBe(Status.SUCCESS);
       expect(full.result.length).toBe(150);
+      expect(full.result[0]).toBe(65);
+      expect(full.result[149]).toBe(66);
+      // Slices of the assembled content are exact.
+      expect([...full.result.slice(0, 100)]).toEqual(
+        Array.from({ length: 100 }, () => 65),
+      );
+      expect([...full.result.slice(100)]).toEqual(
+        Array.from({ length: 50 }, () => 66),
+      );
     } finally {
       handler.stop();
       await run;
