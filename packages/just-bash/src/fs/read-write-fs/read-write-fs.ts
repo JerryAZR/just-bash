@@ -32,7 +32,10 @@ import type {
   RmOptions,
   WriteFileOptions,
 } from "../interface.js";
-import { resolvePath as resolveVPath, toVirtualSlashes } from "../path-utils.js";
+import {
+  resolvePath as resolveVPath,
+  toVirtualSlashes,
+} from "../path-utils.js";
 import {
   isPathWithinRoot,
   normalizePath,
@@ -1676,9 +1679,8 @@ export class ReadWriteFs implements IFileSystem {
       if (isPathWithinRoot(canonicalTarget, this.canonicalRoot)) {
         // Within root - compute virtual target path and return as relative
         const virtualTarget =
-          toVirtualSlashes(
-            canonicalTarget.slice(this.canonicalRoot.length),
-          ) || "/";
+          toVirtualSlashes(canonicalTarget.slice(this.canonicalRoot.length)) ||
+          "/";
         // Return as relative path from the link's virtual directory
         if (linkDir === "/") {
           return virtualTarget.startsWith("/")

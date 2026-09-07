@@ -40,7 +40,6 @@ beforeAll(async () => {
     [
       ...prefix,
       resolve(packageRoot, "src/network/fetch.ts"),
-      resolve(packageRoot, "src/network/fetch.ts"),
       "--bundle",
       "--platform=browser",
       "--format=esm",
