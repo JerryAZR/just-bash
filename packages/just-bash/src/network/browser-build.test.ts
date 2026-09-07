@@ -26,13 +26,20 @@ beforeAll(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "just-bash-browser-fetch-"));
   const outfile = join(tempDir, "fetch.browser.js");
 
-  // Same flags as the build:browser script. Invoke esbuild's JS CLI
-  // through node: the extensionless node_modules/.bin shim is a POSIX
-  // shell script that win32 cannot spawn directly.
+  // Same flags as the build:browser script. The esbuild bin is a
+  // native executable on POSIX (spawn it directly) and a JS shim on
+  // win32 (spawn it through node) — and the extensionless .bin shim is
+  // a POSIX shell script win32 cannot spawn at all.
+  const esbuildBin = resolve(packageRoot, "node_modules/esbuild/bin/esbuild");
+  const [cmd, prefix]: [string, string[]] =
+    process.platform === "win32"
+      ? [process.execPath, [esbuildBin]]
+      : [esbuildBin, []];
   await execFileAsync(
-    process.execPath,
+    cmd,
     [
-      resolve(packageRoot, "node_modules/esbuild/bin/esbuild"),
+      ...prefix,
+      resolve(packageRoot, "src/network/fetch.ts"),
       resolve(packageRoot, "src/network/fetch.ts"),
       "--bundle",
       "--platform=browser",

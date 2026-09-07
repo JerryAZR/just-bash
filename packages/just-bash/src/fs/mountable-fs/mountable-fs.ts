@@ -1,4 +1,3 @@
-import nodePath from "node:path";
 import { type ByteString, readBytesFrom } from "../../encoding.js";
 import { FsError, isFsErrorCode } from "../fs-error.js";
 import { InMemoryFs } from "../in-memory-fs/in-memory-fs.js";

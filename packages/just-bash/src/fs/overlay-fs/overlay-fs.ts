@@ -249,8 +249,9 @@ export class OverlayFs implements IFileSystem {
     const walk = (p: string): void => {
       const r = this.tree.descend(p);
       if (r.kind !== "found" || r.node.type !== "directory") return;
-      for (const [name, child] of (r.node as { children: Map<string, unknown> })
-        .children) {
+      for (const name of (
+        r.node as { children: Map<string, unknown> }
+      ).children.keys()) {
         const childPath = `${p === "/" ? "" : p}/${name}`;
         soften(childPath);
         walk(childPath);
