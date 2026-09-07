@@ -18,6 +18,7 @@ import { DefenseInDepthBox } from "../../security/defense-in-depth-box.js";
 import { _clearFiniteTimeout, _setTimeoutIfFinite } from "../../timers.js";
 import type { CommandExecOptions, ExecResult } from "../../types.js";
 import {
+  ERRNO_TO_WIRE,
   ErrorCode,
   type ErrorCodeType,
   Flags,
@@ -37,36 +38,13 @@ export interface BridgeOutput {
 /**
  * Handles requests from a worker thread.
  */
-/**
- * Map a carried errno (FsError / node-style .code) to the bridge wire
- * code. This is the ONLY classification on the bridge error path:
- * structured codes in, wire codes out. An error with no structured
+/** Map a carried errno (FsError / node-style .code) to the bridge wire
+ * code via the shared ERRNO_TO_WIRE table. An error with no structured
  * code is IO_ERROR — an honest unknown, never a fabricated specific
- * code guessed from prose.
- */
-const ERRNO_TO_BRIDGE: Record<string, ErrorCodeType> = Object.assign(
-  Object.create(null) as Record<string, ErrorCodeType>,
-  {
-    ENOENT: ErrorCode.NOT_FOUND,
-    EISDIR: ErrorCode.IS_DIRECTORY,
-    ENOTDIR: ErrorCode.NOT_DIRECTORY,
-    ENOTEMPTY: ErrorCode.NOT_EMPTY,
-    EEXIST: ErrorCode.EXISTS,
-    EACCES: ErrorCode.PERMISSION_DENIED,
-    EPERM: ErrorCode.PERMISSION_DENIED,
-    EINVAL: ErrorCode.INVALID_PATH,
-    ELOOP: ErrorCode.LOOP,
-    EFBIG: ErrorCode.FILE_TOO_LARGE,
-    ENOSPC: ErrorCode.NO_SPACE,
-    EBUSY: ErrorCode.BUSY,
-    EROFS: ErrorCode.READ_ONLY,
-    EXDEV: ErrorCode.CROSS_DEVICE,
-  },
-);
-
+ * code guessed from prose. */
 function bridgeErrorCodeFromErrno_(code: string | undefined): ErrorCodeType {
-  if (code !== undefined && Object.hasOwn(ERRNO_TO_BRIDGE, code)) {
-    return ERRNO_TO_BRIDGE[code];
+  if (code !== undefined && Object.hasOwn(ERRNO_TO_WIRE, code)) {
+    return ERRNO_TO_WIRE[code];
   }
   return ErrorCode.IO_ERROR;
 }

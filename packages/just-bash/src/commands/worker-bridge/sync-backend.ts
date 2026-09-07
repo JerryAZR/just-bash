@@ -13,6 +13,7 @@ import {
   RequestState,
   ResultState,
   Size,
+  wireToErrnoName,
 } from "./protocol.js";
 
 /**
@@ -130,8 +131,15 @@ export class SyncBackend {
   ): Error {
     const err = new Error(result.error || fallback) as Error & {
       bridgeErrorCode?: number;
+      code?: string;
     };
     err.bridgeErrorCode = result.errorCode;
+    // Node-style .code for guests (js-exec fs shims surface error.code
+    // to guest code): derived from the shared wire table, never parsed.
+    if (result.errorCode !== undefined) {
+      const name = wireToErrnoName(result.errorCode);
+      if (name !== undefined) err.code = name;
+    }
     return err;
   }
 

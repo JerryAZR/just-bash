@@ -115,6 +115,47 @@ export const ErrorCode = {
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+/**
+ * The canonical errno-name <-> wire-code table. Both bridge sides ship
+ * together, so the table lives here (not per-side copies): the host
+ * maps thrown errnos to wire codes with it, and workers derive guest-
+ * facing codes from its inverse via wireToErrnoName(). EPERM precedes
+ * EACCES so the inverse prefers the common node spelling.
+ */
+export const ERRNO_TO_WIRE: Record<string, ErrorCodeType> = Object.assign(
+  Object.create(null) as Record<string, ErrorCodeType>,
+  {
+    ENOENT: ErrorCode.NOT_FOUND,
+    EISDIR: ErrorCode.IS_DIRECTORY,
+    ENOTDIR: ErrorCode.NOT_DIRECTORY,
+    ENOTEMPTY: ErrorCode.NOT_EMPTY,
+    EEXIST: ErrorCode.EXISTS,
+    EPERM: ErrorCode.PERMISSION_DENIED,
+    EACCES: ErrorCode.PERMISSION_DENIED,
+    EINVAL: ErrorCode.INVALID_PATH,
+    ELOOP: ErrorCode.LOOP,
+    EFBIG: ErrorCode.FILE_TOO_LARGE,
+    ENOSPC: ErrorCode.NO_SPACE,
+    EBUSY: ErrorCode.BUSY,
+    EROFS: ErrorCode.READ_ONLY,
+    EXDEV: ErrorCode.CROSS_DEVICE,
+  },
+);
+
+const WIRE_TO_ERRNO: Record<number, string> = Object.assign(
+  Object.create(null) as Record<number, string>,
+  Object.fromEntries(
+    Object.entries(ERRNO_TO_WIRE).map(([name, code]) => [code, name]),
+  ),
+);
+
+/** Errno name for a wire code, or undefined for non-errno wire codes
+ * (NONE, IO_ERROR, network conditions). PERMISSION_DENIED inverts to
+ * EACCES (the more common spelling in node guests). */
+export function wireToErrnoName(code: number): string | undefined {
+  return Object.hasOwn(WIRE_TO_ERRNO, code) ? WIRE_TO_ERRNO[code] : undefined;
+}
+
 /** Buffer layout offsets */
 const Offset = {
   OP_CODE: 0,

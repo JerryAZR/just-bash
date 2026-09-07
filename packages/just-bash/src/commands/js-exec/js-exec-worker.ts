@@ -124,8 +124,27 @@ function formatError(errorVal: unknown): string {
 function throwError(
   context: QuickJSContext,
   message: string,
+  code?: string,
 ): { error: QuickJSHandle } {
-  return { error: context.newError(message) };
+  const err = context.newError(message);
+  if (code !== undefined) {
+    const codeHandle = context.newString(code);
+    context.setProp(err, "code", codeHandle);
+    codeHandle.dispose();
+  }
+  return { error: err };
+}
+
+/** Bridge/backend failure -> guest error: carries the node-style .code
+ * (attached by opError_ from the shared wire table) across the QuickJS
+ * boundary, which otherwise only marshals the message string. */
+function throwGuestError_(
+  context: QuickJSContext,
+  e: unknown,
+  fallback: string,
+): { error: QuickJSHandle } {
+  const err = e as (Error & { code?: string }) | null;
+  return throwError(context, err?.message || fallback, err?.code);
 }
 
 function isProcessExit(
@@ -406,7 +425,7 @@ function setupContext(
     try {
       backend.writeStdout(`${parts.join(" ")}\n`);
     } catch (e) {
-      return throwError(context, (e as Error).message || "write failed");
+      return throwGuestError_(context, e, "write failed");
     }
     return context.undefined;
   });
@@ -421,7 +440,7 @@ function setupContext(
     try {
       backend.writeStderr(`${parts.join(" ")}\n`);
     } catch (e) {
-      return throwError(context, (e as Error).message || "write failed");
+      return throwGuestError_(context, e, "write failed");
     }
     return context.undefined;
   });
@@ -437,7 +456,7 @@ function setupContext(
     try {
       backend.writeStderr(`${parts.join(" ")}\n`);
     } catch (e) {
-      return throwError(context, (e as Error).message || "write failed");
+      return throwGuestError_(context, e, "write failed");
     }
     return context.undefined;
   });
@@ -458,7 +477,7 @@ function setupContext(
         const data = backend.readFile(path);
         return context.newString(new TextDecoder().decode(data));
       } catch (e) {
-        return throwError(context, (e as Error).message || "readFile failed");
+        return throwGuestError_(context, e, "readFile failed");
       }
     },
   );
@@ -476,10 +495,7 @@ function setupContext(
           data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
         );
       } catch (e) {
-        return throwError(
-          context,
-          (e as Error).message || "readFileBuffer failed",
-        );
+        return throwGuestError_(context, e, "readFileBuffer failed");
       }
     },
   );
@@ -543,7 +559,7 @@ function setupContext(
         backend.writeFile(path, marshalWriteData(dataHandle));
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "writeFile failed");
+        return throwGuestError_(context, e, "writeFile failed");
       }
     },
   );
@@ -563,7 +579,7 @@ function setupContext(
         mtime: stat.mtime.toISOString(),
       });
     } catch (e) {
-      return throwError(context, (e as Error).message || "stat failed");
+      return throwGuestError_(context, e, "stat failed");
     }
   });
   context.setProp(fsObj, "stat", statFn);
@@ -577,7 +593,7 @@ function setupContext(
         const entries = backend.readdir(path);
         return jsToHandle(context, entries);
       } catch (e) {
-        return throwError(context, (e as Error).message || "readdir failed");
+        return throwGuestError_(context, e, "readdir failed");
       }
     },
   );
@@ -599,7 +615,7 @@ function setupContext(
         backend.mkdir(path, recursive);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "mkdir failed");
+        return throwGuestError_(context, e, "mkdir failed");
       }
     },
   );
@@ -623,7 +639,7 @@ function setupContext(
         backend.rm(path, recursive, force);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "rm failed");
+        return throwGuestError_(context, e, "rm failed");
       }
     },
   );
@@ -648,7 +664,7 @@ function setupContext(
         backend.appendFile(path, marshalWriteData(dataHandle));
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "appendFile failed");
+        return throwGuestError_(context, e, "appendFile failed");
       }
     },
   );
@@ -668,7 +684,7 @@ function setupContext(
         mtime: s.mtime.toISOString(),
       });
     } catch (e) {
-      return throwError(context, (e as Error).message || "lstat failed");
+      return throwGuestError_(context, e, "lstat failed");
     }
   });
   context.setProp(fsObj, "lstat", lstatFn);
@@ -683,7 +699,7 @@ function setupContext(
         backend.symlink(target, linkPath);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "symlink failed");
+        return throwGuestError_(context, e, "symlink failed");
       }
     },
   );
@@ -698,7 +714,7 @@ function setupContext(
         const target = backend.readlink(path);
         return context.newString(target);
       } catch (e) {
-        return throwError(context, (e as Error).message || "readlink failed");
+        return throwGuestError_(context, e, "readlink failed");
       }
     },
   );
@@ -714,7 +730,7 @@ function setupContext(
         backend.chmod(path, typeof mode === "number" ? mode : 0);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "chmod failed");
+        return throwGuestError_(context, e, "chmod failed");
       }
     },
   );
@@ -729,7 +745,7 @@ function setupContext(
         const resolved = backend.realpath(path);
         return context.newString(resolved);
       } catch (e) {
-        return throwError(context, (e as Error).message || "realpath failed");
+        return throwGuestError_(context, e, "realpath failed");
       }
     },
   );
@@ -745,7 +761,7 @@ function setupContext(
         backend.rename(oldPath, newPath);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "rename failed");
+        return throwGuestError_(context, e, "rename failed");
       }
     },
   );
@@ -761,7 +777,7 @@ function setupContext(
         backend.copyFile(src, dest);
         return context.undefined;
       } catch (e) {
-        return throwError(context, (e as Error).message || "copyFile failed");
+        return throwGuestError_(context, e, "copyFile failed");
       }
     },
   );
@@ -789,7 +805,7 @@ function setupContext(
         });
         return jsToHandle(context, result);
       } catch (e) {
-        return throwError(context, (e as Error).message || "fetch failed");
+        return throwGuestError_(context, e, "fetch failed");
       }
     },
   );
@@ -812,7 +828,7 @@ function setupContext(
         const result = backend.execCommand(command, stdin);
         return jsToHandle(context, result);
       } catch (e) {
-        return throwError(context, (e as Error).message || "exec failed");
+        return throwGuestError_(context, e, "exec failed");
       }
     },
   );
@@ -829,7 +845,7 @@ function setupContext(
         const result = backend.execCommandArgs(command, args);
         return jsToHandle(context, result);
       } catch (e) {
-        return throwError(context, (e as Error).message || "exec failed");
+        return throwGuestError_(context, e, "exec failed");
       }
     },
   );
@@ -847,10 +863,7 @@ function setupContext(
           const resultJson = backend.invokeTool(path, argsJson);
           return context.newString(resultJson);
         } catch (e) {
-          return throwError(
-            context,
-            (e as Error).message || "tool invocation failed",
-          );
+          return throwGuestError_(context, e, "tool invocation failed");
         }
       },
     );

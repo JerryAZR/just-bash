@@ -236,6 +236,15 @@ describe("js-exec Node.js compatibility", () => {
       expect(result.exitCode).toBe(0);
     });
 
+    it("fs errors carry node-style .code (ENOENT, not just a message)", async () => {
+      const env = new Bash({ javascript: true });
+      const result = await env.exec(
+        `js-exec -c "try { fs.readFileSync('/missing.txt') } catch (e) { console.log(typeof e.code, e.code) }"`,
+      );
+      expect(result.stdout).toBe("string ENOENT\n");
+      expect(result.exitCode).toBe(0);
+    });
+
     it("should support copyFile", async () => {
       const env = new Bash({ javascript: true });
       const result = await env.exec(

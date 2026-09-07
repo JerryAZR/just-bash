@@ -22,7 +22,10 @@ import {
   sanitizeUnknownError,
   wrapWasmCallback,
 } from "../../security/wasm-callback.js";
-import { ErrorCode as BridgeErrorCode } from "../worker-bridge/protocol.js";
+import {
+  ErrorCode as BridgeErrorCode,
+  wireToErrnoName,
+} from "../worker-bridge/protocol.js";
 import { SyncBackend } from "../worker-bridge/sync-backend.js";
 
 export interface WorkerInput {
@@ -357,36 +360,11 @@ function createHOSTFS(
     const bridgeCode = (e as { bridgeErrorCode?: number } | null)
       ?.bridgeErrorCode;
     if (typeof bridgeCode === "number" && bridgeCode !== BridgeErrorCode.NONE) {
-      switch (bridgeCode) {
-        case BridgeErrorCode.NOT_FOUND:
-          return ERRNO_CODES.ENOENT;
-        case BridgeErrorCode.IS_DIRECTORY:
-          return ERRNO_CODES.EISDIR;
-        case BridgeErrorCode.NOT_DIRECTORY:
-          return ERRNO_CODES.ENOTDIR;
-        case BridgeErrorCode.EXISTS:
-          return ERRNO_CODES.EEXIST;
-        case BridgeErrorCode.PERMISSION_DENIED:
-          return ERRNO_CODES.EACCES;
-        case BridgeErrorCode.NOT_EMPTY:
-          return ERRNO_CODES.ENOTEMPTY;
-        case BridgeErrorCode.INVALID_PATH:
-          return ERRNO_CODES.EINVAL;
-        case BridgeErrorCode.LOOP:
-          return ERRNO_CODES.ELOOP;
-        case BridgeErrorCode.FILE_TOO_LARGE:
-          return ERRNO_CODES.EFBIG;
-        case BridgeErrorCode.NO_SPACE:
-          return ERRNO_CODES.ENOSPC;
-        case BridgeErrorCode.BUSY:
-          return ERRNO_CODES.EBUSY;
-        case BridgeErrorCode.READ_ONLY:
-          return ERRNO_CODES.EROFS;
-        case BridgeErrorCode.CROSS_DEVICE:
-          return ERRNO_CODES.EXDEV;
-        default:
-          return ERRNO_CODES.EIO;
+      const name = wireToErrnoName(bridgeCode);
+      if (name !== undefined && Object.hasOwn(ERRNO_CODES, name)) {
+        return ERRNO_CODES[name];
       }
+      return ERRNO_CODES.EIO;
     }
     // No structured code: honest unknown. Every backend op failure
     // carries the bridge's numeric code (mapped above); anything else
