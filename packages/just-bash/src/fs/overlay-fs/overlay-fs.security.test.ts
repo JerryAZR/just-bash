@@ -502,15 +502,27 @@ describe("OverlayFs Security - Path Traversal Prevention", () => {
     });
 
     it("should not list the real outside directory", async () => {
-      await expect(overlay.readdir(outsideDir)).rejects.toThrow();
+      if (process.platform === "win32") {
+        // win32: a drive-absolute host path resolves OUTSIDE the root at
+        // the gate (nodePath.resolve semantics) — outsideOverlay:true —
+        // so readdir returns the designed secure empty list. Either way,
+        // outside content is never served.
+        expect(await overlay.readdir(outsideDir)).toEqual([]);
+      } else {
+        await expect(overlay.readdir(outsideDir)).rejects.toThrow();
+      }
     });
 
     it("should not list via absolute path with traversal prefix", async () => {
       // The traversal prefix is stripped, leaving an absolute path like /var/folders/...
       // which doesn't exist in the overlay - throws ENOENT (secure behavior)
-      await expect(overlay.readdir(`/../../../${outsideDir}`)).rejects.toThrow(
-        "ENOENT",
-      );
+      if (process.platform === "win32") {
+        expect(await overlay.readdir(`/../../../${outsideDir}`)).toEqual([]);
+      } else {
+        await expect(
+          overlay.readdir(`/../../../${outsideDir}`),
+        ).rejects.toThrow("ENOENT");
+      }
     });
 
     it("should handle readdir on root with various traversal attempts", async () => {
@@ -613,8 +625,17 @@ describe("OverlayFs Security - Path Traversal Prevention", () => {
     });
 
     it("should not allow readdir via Windows-style paths", async () => {
-      await expect(overlay.readdir("\\..\\..\\etc")).rejects.toThrow();
-      await expect(overlay.readdir("/subdir\\..\\..\\etc")).rejects.toThrow();
+      if (process.platform === "win32") {
+        // Backslashes ARE separators on win32: these are genuine
+        // traversals, caught at the gate (outsideOverlay) and answered
+        // with the designed secure empty list. POSIX treats them as
+        // literal filename chars and answers ENOENT instead.
+        expect(await overlay.readdir("\\..\\..\\etc")).toEqual([]);
+        expect(await overlay.readdir("/subdir\\..\\..\\etc")).toEqual([]);
+      } else {
+        await expect(overlay.readdir("\\..\\..\\etc")).rejects.toThrow();
+        await expect(overlay.readdir("/subdir\\..\\..\\etc")).rejects.toThrow();
+      }
     });
 
     it("should handle readdir with URL-encoded traversal (literal)", async () => {
