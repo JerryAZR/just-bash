@@ -27,16 +27,26 @@ const TRANSFORM_README_PATH = path.join(
   "README.md",
 );
 
+/**
+ * Read a markdown file under test, normalizing CRLF to LF. The repository
+ * may be checked out with core.autocrlf=true on win32, and the section/code
+ * block extraction below assumes LF line endings; normalizing keeps the
+ * assertions identical to what an LF checkout (e.g. CI) sees.
+ */
+function readMarkdown(filePath: string): string {
+  return fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
+}
+
 function parseReadme(): string {
-  return fs.readFileSync(README_PATH, "utf-8");
+  return readMarkdown(README_PATH);
 }
 
 function parseAgents(): string {
-  return fs.readFileSync(AGENTS_PATH, "utf-8");
+  return readMarkdown(AGENTS_PATH);
 }
 
 function parseTransformReadme(): string {
-  return fs.readFileSync(TRANSFORM_README_PATH, "utf-8");
+  return readMarkdown(TRANSFORM_README_PATH);
 }
 
 /**

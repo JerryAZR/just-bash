@@ -1,14 +1,12 @@
 import { execFileSync } from "node:child_process";
 import * as nodeModule from "node:module";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const sourceUrl = pathToFileURL(
-  new URL("./defense-in-depth-box.ts", import.meta.url).pathname,
-).href;
-const bashSourceUrl = pathToFileURL(
-  new URL("../Bash.ts", import.meta.url).pathname,
-).href;
+// import.meta.url is already a correct file URL on every platform; routing
+// it through .pathname + pathToFileURL double-prefixes the drive letter on
+// win32 (file:///C:/C:/...).
+const sourceUrl = new URL("./defense-in-depth-box.ts", import.meta.url).href;
+const bashSourceUrl = new URL("../Bash.ts", import.meta.url).href;
 const tsxLoaderUrl = import.meta.resolve("tsx");
 function run(node: string, inputType: "module" | "commonjs", body: string) {
   return execFileSync(

@@ -40,13 +40,36 @@ describe("ReadWriteFs hard-link containment through shell operations", () => {
     );
   });
 
+  const assertContentContainment = async (
+    _name: string,
+    script: string,
+    expectedInside: string,
+    expectedStdout: string,
+  ) => {
+    const result = await bash.exec(script);
+
+    expect(result.stdout).toBe(expectedStdout);
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(linkedFile, "utf8")).toBe(expectedInside);
+    expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside\n");
+  };
+
+  // Copy-on-write containment stages the replacement while holding the
+  // source open, then rename()s over it; win32 cannot rename over an open
+  // file (EPERM), so append containment is POSIX-only.
+  it
+    .skipIf(process.platform === "win32")
+    .each([
+      [
+        "append redirection",
+        "echo sandbox >> linked.txt",
+        "outside\nsandbox\n",
+        "",
+      ],
+    ])("contains %s", assertContentContainment);
+
   it.each([
-    [
-      "append redirection",
-      "echo sandbox >> linked.txt",
-      "outside\nsandbox\n",
-      "",
-    ],
     [
       "tee overwrite",
       "echo sandbox | tee linked.txt",
@@ -60,17 +83,11 @@ describe("ReadWriteFs hard-link containment through shell operations", () => {
       "sandbox\n",
       "",
     ],
-  ])("contains %s", async (_name, script, expectedInside, expectedStdout) => {
-    const result = await bash.exec(script);
+  ])("contains %s", assertContentContainment);
 
-    expect(result.stdout).toBe(expectedStdout);
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
-    expect(fs.readFileSync(linkedFile, "utf8")).toBe(expectedInside);
-    expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside\n");
-  });
-
-  it.each([
+  // chmod/touch on a multiply-linked file use copy-on-write, which cannot
+  // rename over an open file on win32 (EPERM) — POSIX-only.
+  it.skipIf(process.platform === "win32").each([
     ["chmod", "chmod 700 linked.txt"],
     ["touch", "touch -m -t 202001010000 linked.txt"],
   ])("contains %s metadata mutation", async (_name, script) => {

@@ -180,7 +180,10 @@ describe("Oils Spec Tests", () => {
 
     describe(fileName, () => {
       // Parse must succeed - this is not optional
-      const content = fs.readFileSync(filePath, "utf-8");
+      // Normalize CRLF: on win32 the case files may be checked out with
+      // core.autocrlf=true, which would otherwise pollute both the executed
+      // scripts and the expected outputs with stray CR characters.
+      const content = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
       const specFile = parseSpecFile(content, filePath);
 
       // Must have test cases

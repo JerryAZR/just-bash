@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { canCreateSymlinks } from "../../test-utils/fs-env.js";
 import { ReadWriteFs } from "./read-write-fs.js";
 
 describe("ReadWriteFs recursive copy and append hardening", () => {
@@ -21,104 +22,124 @@ describe("ReadWriteFs recursive copy and append hardening", () => {
     fs.rmSync(parentDir, { recursive: true, force: true });
   });
 
-  it("copies safe nested symlinks when symlinks are enabled", async () => {
-    const sourceDir = path.join(sandboxDir, "source");
-    fs.mkdirSync(sourceDir);
-    fs.writeFileSync(path.join(sourceDir, "target.txt"), "content");
-    fs.symlinkSync("target.txt", path.join(sourceDir, "link.txt"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "copies safe nested symlinks when symlinks are enabled",
+    async () => {
+      const sourceDir = path.join(sandboxDir, "source");
+      fs.mkdirSync(sourceDir);
+      fs.writeFileSync(path.join(sourceDir, "target.txt"), "content");
+      fs.symlinkSync("target.txt", path.join(sourceDir, "link.txt"));
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
 
-    await rwfs.cp("/source", "/destination", { recursive: true });
+      await rwfs.cp("/source", "/destination", { recursive: true });
 
-    const copiedLink = path.join(sandboxDir, "destination", "link.txt");
-    expect(fs.lstatSync(copiedLink).isSymbolicLink()).toBe(true);
-    expect(await rwfs.readlink("/destination/link.txt")).toBe("target.txt");
-    expect(fs.readFileSync(copiedLink, "utf8")).toBe("content");
-  });
+      const copiedLink = path.join(sandboxDir, "destination", "link.txt");
+      expect(fs.lstatSync(copiedLink).isSymbolicLink()).toBe(true);
+      expect(await rwfs.readlink("/destination/link.txt")).toBe("target.txt");
+      expect(fs.readFileSync(copiedLink, "utf8")).toBe("content");
+    },
+  );
 
-  it("preserves an absolute virtual symlink target at a different depth", async () => {
-    fs.mkdirSync(path.join(sandboxDir, "source"));
-    fs.writeFileSync(path.join(sandboxDir, "target.txt"), "content");
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
-    await rwfs.symlink("/target.txt", "/source/link.txt");
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "preserves an absolute virtual symlink target at a different depth",
+    async () => {
+      fs.mkdirSync(path.join(sandboxDir, "source"));
+      fs.writeFileSync(path.join(sandboxDir, "target.txt"), "content");
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+      await rwfs.symlink("/target.txt", "/source/link.txt");
 
-    await rwfs.cp("/source/link.txt", "/deep/nested/link.txt");
+      await rwfs.cp("/source/link.txt", "/deep/nested/link.txt");
 
-    expect(fs.readlinkSync(path.join(sandboxDir, "deep/nested/link.txt"))).toBe(
-      path.join(fs.realpathSync(sandboxDir), "target.txt"),
-    );
-    expect(await rwfs.readlink("/deep/nested/link.txt")).toBe(
-      "../../target.txt",
-    );
-    expect(
-      fs.readFileSync(path.join(sandboxDir, "deep/nested/link.txt"), "utf8"),
-    ).toBe("content");
-  });
+      expect(
+        fs.readlinkSync(path.join(sandboxDir, "deep/nested/link.txt")),
+      ).toBe(path.join(fs.realpathSync(sandboxDir), "target.txt"));
+      expect(await rwfs.readlink("/deep/nested/link.txt")).toBe(
+        "../../target.txt",
+      );
+      expect(
+        fs.readFileSync(path.join(sandboxDir, "deep/nested/link.txt"), "utf8"),
+      ).toBe("content");
+    },
+  );
 
-  it("copies an absolute symlink through a symlink-spelled root", async () => {
-    const realRoot = path.join(parentDir, "real-root");
-    const rootAlias = path.join(parentDir, "root-alias");
-    fs.mkdirSync(realRoot);
-    fs.symlinkSync(realRoot, rootAlias, "dir");
-    fs.mkdirSync(path.join(realRoot, "source"));
-    fs.writeFileSync(path.join(realRoot, "target.txt"), "content");
-    fs.symlinkSync(
-      path.join(rootAlias, "target.txt"),
-      path.join(realRoot, "source/link.txt"),
-    );
-    const rwfs = new ReadWriteFs({ root: rootAlias, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "copies an absolute symlink through a symlink-spelled root",
+    async () => {
+      const realRoot = path.join(parentDir, "real-root");
+      const rootAlias = path.join(parentDir, "root-alias");
+      fs.mkdirSync(realRoot);
+      fs.symlinkSync(realRoot, rootAlias, "dir");
+      fs.mkdirSync(path.join(realRoot, "source"));
+      fs.writeFileSync(path.join(realRoot, "target.txt"), "content");
+      fs.symlinkSync(
+        path.join(rootAlias, "target.txt"),
+        path.join(realRoot, "source/link.txt"),
+      );
+      const rwfs = new ReadWriteFs({ root: rootAlias, allowSymlinks: true });
 
-    await rwfs.cp("/source/link.txt", "/copied/link.txt");
+      await rwfs.cp("/source/link.txt", "/copied/link.txt");
 
-    const copied = path.join(realRoot, "copied/link.txt");
-    expect(fs.readlinkSync(copied)).toBe(
-      path.join(fs.realpathSync(realRoot), "target.txt"),
-    );
-    expect(fs.readFileSync(copied, "utf8")).toBe("content");
-  });
+      const copied = path.join(realRoot, "copied/link.txt");
+      expect(fs.readlinkSync(copied)).toBe(
+        path.join(fs.realpathSync(realRoot), "target.txt"),
+      );
+      expect(fs.readFileSync(copied, "utf8")).toBe("content");
+    },
+  );
 
-  it("preserves a relative symlink target when copying to a missing parent", async () => {
-    fs.mkdirSync(path.join(sandboxDir, "source"));
-    fs.writeFileSync(path.join(sandboxDir, "source/target.txt"), "content");
-    fs.symlinkSync("target.txt", path.join(sandboxDir, "source/link.txt"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "preserves a relative symlink target when copying to a missing parent",
+    async () => {
+      fs.mkdirSync(path.join(sandboxDir, "source"));
+      fs.writeFileSync(path.join(sandboxDir, "source/target.txt"), "content");
+      fs.symlinkSync("target.txt", path.join(sandboxDir, "source/link.txt"));
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
 
-    await rwfs.cp("/source/link.txt", "/missing/parent/link.txt");
+      await rwfs.cp("/source/link.txt", "/missing/parent/link.txt");
 
-    expect(
-      fs.readlinkSync(path.join(sandboxDir, "missing/parent/link.txt")),
-    ).toBe("target.txt");
-    expect(
-      fs
-        .lstatSync(path.join(sandboxDir, "missing/parent/link.txt"))
-        .isSymbolicLink(),
-    ).toBe(true);
-  });
+      expect(
+        fs.readlinkSync(path.join(sandboxDir, "missing/parent/link.txt")),
+      ).toBe("target.txt");
+      expect(
+        fs
+          .lstatSync(path.join(sandboxDir, "missing/parent/link.txt"))
+          .isSymbolicLink(),
+      ).toBe(true);
+    },
+  );
 
-  it("keeps a deep relative symlink inside the root when copied shallower", async () => {
-    const sourceDir = path.join(sandboxDir, "deep/nested/source");
-    const outsideCanary = path.join(outsideDir, "canary.txt");
-    fs.mkdirSync(sourceDir, { recursive: true });
-    fs.writeFileSync(path.join(sandboxDir, "inside.txt"), "inside");
-    fs.writeFileSync(outsideCanary, "outside");
-    fs.symlinkSync("../../../inside.txt", path.join(sourceDir, "link.txt"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "keeps a deep relative symlink inside the root when copied shallower",
+    async () => {
+      const sourceDir = path.join(sandboxDir, "deep/nested/source");
+      const outsideCanary = path.join(outsideDir, "canary.txt");
+      fs.mkdirSync(sourceDir, { recursive: true });
+      fs.writeFileSync(path.join(sandboxDir, "inside.txt"), "inside");
+      fs.writeFileSync(outsideCanary, "outside");
+      fs.symlinkSync("../../../inside.txt", path.join(sourceDir, "link.txt"));
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
 
-    await rwfs.cp("/deep/nested/source/link.txt", "/copied-link.txt");
+      await rwfs.cp("/deep/nested/source/link.txt", "/copied-link.txt");
 
-    const copiedLink = path.join(sandboxDir, "copied-link.txt");
-    const rawTarget = fs.readlinkSync(copiedLink);
-    const resolvedTarget = fs.realpathSync(copiedLink);
-    const canonicalRoot = fs.realpathSync(sandboxDir);
-    expect(rawTarget).toBe("inside.txt");
-    expect(resolvedTarget).toBe(path.join(canonicalRoot, "inside.txt"));
-    expect(
-      resolvedTarget === canonicalRoot ||
-        resolvedTarget.startsWith(`${canonicalRoot}${path.sep}`),
-    ).toBe(true);
-    expect(fs.readFileSync(copiedLink, "utf8")).toBe("inside");
-    expect(fs.readFileSync(outsideCanary, "utf8")).toBe("outside");
-  });
+      const copiedLink = path.join(sandboxDir, "copied-link.txt");
+      const rawTarget = fs.readlinkSync(copiedLink);
+      const resolvedTarget = fs.realpathSync(copiedLink);
+      const canonicalRoot = fs.realpathSync(sandboxDir);
+      expect(rawTarget).toBe("inside.txt");
+      expect(resolvedTarget).toBe(path.join(canonicalRoot, "inside.txt"));
+      expect(
+        resolvedTarget === canonicalRoot ||
+          resolvedTarget.startsWith(`${canonicalRoot}${path.sep}`),
+      ).toBe(true);
+      expect(fs.readFileSync(copiedLink, "utf8")).toBe("inside");
+      expect(fs.readFileSync(outsideCanary, "utf8")).toBe("outside");
+    },
+  );
 
   it("rejects a regular file copied onto the same path", async () => {
     const source = path.join(sandboxDir, "same.txt");
@@ -148,63 +169,78 @@ describe("ReadWriteFs recursive copy and append hardening", () => {
     expect(fs.statSync(source).ino).toBe(fs.statSync(alias).ino);
   });
 
-  it("rejects a symlink copied onto itself", async () => {
-    fs.writeFileSync(path.join(sandboxDir, "target.txt"), "content");
-    fs.symlinkSync("target.txt", path.join(sandboxDir, "link.txt"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "rejects a symlink copied onto itself",
+    async () => {
+      fs.writeFileSync(path.join(sandboxDir, "target.txt"), "content");
+      fs.symlinkSync("target.txt", path.join(sandboxDir, "link.txt"));
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
 
-    await expect(rwfs.cp("/link.txt", "/link.txt")).rejects.toThrow(
-      "cannot copy '/link.txt' onto itself",
-    );
+      await expect(rwfs.cp("/link.txt", "/link.txt")).rejects.toThrow(
+        "cannot copy '/link.txt' onto itself",
+      );
 
-    expect(fs.readlinkSync(path.join(sandboxDir, "link.txt"))).toBe(
-      "target.txt",
-    );
-  });
+      expect(fs.readlinkSync(path.join(sandboxDir, "link.txt"))).toBe(
+        "target.txt",
+      );
+    },
+  );
 
-  it("rejects a nested destination directory symlink that escapes the root", async () => {
-    fs.mkdirSync(path.join(sandboxDir, "source", "nested"), {
-      recursive: true,
-    });
-    fs.writeFileSync(
-      path.join(sandboxDir, "source", "nested", "payload.txt"),
-      "sandbox",
-    );
-    fs.mkdirSync(path.join(sandboxDir, "destination"));
-    fs.symlinkSync(outsideDir, path.join(sandboxDir, "destination", "nested"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "rejects a nested destination directory symlink that escapes the root",
+    async () => {
+      fs.mkdirSync(path.join(sandboxDir, "source", "nested"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(sandboxDir, "source", "nested", "payload.txt"),
+        "sandbox",
+      );
+      fs.mkdirSync(path.join(sandboxDir, "destination"));
+      fs.symlinkSync(
+        outsideDir,
+        path.join(sandboxDir, "destination", "nested"),
+      );
+      const rwfs = new ReadWriteFs({ root: sandboxDir });
 
-    await expect(
-      rwfs.cp("/source", "/destination", { recursive: true }),
-    ).rejects.toThrow("resolves outside sandbox");
+      await expect(
+        rwfs.cp("/source", "/destination", { recursive: true }),
+      ).rejects.toThrow("resolves outside sandbox");
 
-    expect(fs.existsSync(path.join(outsideDir, "payload.txt"))).toBe(false);
-  });
+      expect(fs.existsSync(path.join(outsideDir, "payload.txt"))).toBe(false);
+    },
+  );
 
-  it("serializes appends through aliases of the same canonical file", async () => {
-    fs.writeFileSync(path.join(sandboxDir, "target.txt"), "start");
-    fs.symlinkSync("target.txt", path.join(sandboxDir, "first.txt"));
-    fs.symlinkSync("target.txt", path.join(sandboxDir, "second.txt"));
-    const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
-    const appends = Array.from({ length: 20 }, (_, index) => `|${index}`);
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "serializes appends through aliases of the same canonical file",
+    async () => {
+      fs.writeFileSync(path.join(sandboxDir, "target.txt"), "start");
+      fs.symlinkSync("target.txt", path.join(sandboxDir, "first.txt"));
+      fs.symlinkSync("target.txt", path.join(sandboxDir, "second.txt"));
+      const rwfs = new ReadWriteFs({ root: sandboxDir, allowSymlinks: true });
+      const appends = Array.from({ length: 20 }, (_, index) => `|${index}`);
 
-    await Promise.all(
-      appends.map((content, index) =>
-        rwfs.appendFile(
-          index % 2 === 0 ? "/first.txt" : "/second.txt",
-          content,
+      await Promise.all(
+        appends.map((content, index) =>
+          rwfs.appendFile(
+            index % 2 === 0 ? "/first.txt" : "/second.txt",
+            content,
+          ),
         ),
-      ),
-    );
+      );
 
-    const parts = fs
-      .readFileSync(path.join(sandboxDir, "target.txt"), "utf8")
-      .split("|");
-    expect(parts[0]).toBe("start");
-    expect(parts.slice(1).sort((a, b) => Number(a) - Number(b))).toEqual(
-      appends.map((content) => content.slice(1)),
-    );
-  });
+      const parts = fs
+        .readFileSync(path.join(sandboxDir, "target.txt"), "utf8")
+        .split("|");
+      expect(parts[0]).toBe("start");
+      expect(parts.slice(1).sort((a, b) => Number(a) - Number(b))).toEqual(
+        appends.map((content) => content.slice(1)),
+      );
+    },
+  );
 
   it("fails closed if a shared append source changes before copying", async () => {
     const target = path.join(sandboxDir, "shared.txt");

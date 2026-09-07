@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import {
+  canUseXzCompression,
+  canUseZstdCompression,
+} from "../../test-utils/fs-env.js";
 
 describe("tar", () => {
   describe("help and errors", () => {
@@ -481,18 +485,23 @@ describe("tar", () => {
   });
 
   describe("xz compression (-J)", () => {
-    it("should preserve xz compression by default", async () => {
-      const env = new Bash({
-        files: {
-          "/test.txt": "Hello, xz compressed World!",
-        },
-      });
-      const result = await env.exec("tar -cJvf /archive.tar.xz /test.txt");
-      expect(result.exitCode).toBe(0);
-      expect((await env.exec("tar -tJf /archive.tar.xz")).stdout).toContain(
-        "test.txt",
-      );
-    });
+    // tar's codec requires an optional native module that is not
+    // loadable in this environment (no win32 prebuilds).
+    it.skipIf(!canUseXzCompression())(
+      "should preserve xz compression by default",
+      async () => {
+        const env = new Bash({
+          files: {
+            "/test.txt": "Hello, xz compressed World!",
+          },
+        });
+        const result = await env.exec("tar -cJvf /archive.tar.xz /test.txt");
+        expect(result.exitCode).toBe(0);
+        expect((await env.exec("tar -tJf /archive.tar.xz")).stdout).toContain(
+          "test.txt",
+        );
+      },
+    );
   });
 
   describe("gzip compression (-z)", () => {
@@ -1079,33 +1088,43 @@ describe("tar", () => {
       expect(list.stdout).toContain("test.txt");
     });
 
-    it("should auto-detect xz from .tar.xz extension", async () => {
-      const env = new Bash({
-        files: {
-          "/test.txt": "Hello World",
-        },
-      });
+    // tar's codec requires an optional native module that is not
+    // loadable in this environment (no win32 prebuilds).
+    it.skipIf(!canUseXzCompression())(
+      "should auto-detect xz from .tar.xz extension",
+      async () => {
+        const env = new Bash({
+          files: {
+            "/test.txt": "Hello World",
+          },
+        });
 
-      const result = await env.exec("tar -caf /archive.tar.xz /test.txt");
-      expect(result.exitCode).toBe(0);
-      expect((await env.exec("tar -tf /archive.tar.xz")).stdout).toContain(
-        "test.txt",
-      );
-    });
+        const result = await env.exec("tar -caf /archive.tar.xz /test.txt");
+        expect(result.exitCode).toBe(0);
+        expect((await env.exec("tar -tf /archive.tar.xz")).stdout).toContain(
+          "test.txt",
+        );
+      },
+    );
 
-    it("should auto-detect zstd from .tar.zst extension", async () => {
-      const env = new Bash({
-        files: {
-          "/test.txt": "Hello World",
-        },
-      });
+    // tar's codec requires an optional native module that is not
+    // loadable in this environment (no win32 prebuilds).
+    it.skipIf(!canUseZstdCompression())(
+      "should auto-detect zstd from .tar.zst extension",
+      async () => {
+        const env = new Bash({
+          files: {
+            "/test.txt": "Hello World",
+          },
+        });
 
-      const result = await env.exec("tar -caf /archive.tar.zst /test.txt");
-      expect(result.exitCode).toBe(0);
-      expect((await env.exec("tar -tf /archive.tar.zst")).stdout).toContain(
-        "test.txt",
-      );
-    });
+        const result = await env.exec("tar -caf /archive.tar.zst /test.txt");
+        expect(result.exitCode).toBe(0);
+        expect((await env.exec("tar -tf /archive.tar.zst")).stdout).toContain(
+          "test.txt",
+        );
+      },
+    );
 
     it("should create plain tar for .tar extension", async () => {
       const env = new Bash({
@@ -1253,21 +1272,26 @@ describe("tar", () => {
   });
 
   describe("zstd compression (--zstd)", () => {
-    it("should preserve zstd compression by default", async () => {
-      const env = new Bash({
-        files: {
-          "/test.txt": "Hello World",
-        },
-      });
+    // tar's codec requires an optional native module that is not
+    // loadable in this environment (no win32 prebuilds).
+    it.skipIf(!canUseZstdCompression())(
+      "should preserve zstd compression by default",
+      async () => {
+        const env = new Bash({
+          files: {
+            "/test.txt": "Hello World",
+          },
+        });
 
-      const result = await env.exec(
-        "tar --zstd -cf /archive.tar.zst /test.txt",
-      );
-      expect(result.exitCode).toBe(0);
-      expect(
-        (await env.exec("tar --zstd -tf /archive.tar.zst")).stdout,
-      ).toContain("test.txt");
-    });
+        const result = await env.exec(
+          "tar --zstd -cf /archive.tar.zst /test.txt",
+        );
+        expect(result.exitCode).toBe(0);
+        expect(
+          (await env.exec("tar --zstd -tf /archive.tar.zst")).stdout,
+        ).toContain("test.txt");
+      },
+    );
   });
 
   describe("binary stdin handling", () => {

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { canCreateSymlinks } from "../../test-utils/fs-env.js";
 import { ReadWriteFs } from "./read-write-fs.js";
 
 describe("ReadWriteFs", () => {
@@ -382,30 +383,39 @@ describe("ReadWriteFs", () => {
   });
 
   describe("chmod", () => {
-    it("should change file permissions", async () => {
-      fs.writeFileSync(path.join(tempDir, "file.txt"), "content");
-      const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
+    // Exact POSIX mode bits are fictional on win32 (only the read-only bit
+    // exists), so the mode-value assertions are POSIX-only.
+    it.skipIf(process.platform === "win32")(
+      "should change file permissions",
+      async () => {
+        fs.writeFileSync(path.join(tempDir, "file.txt"), "content");
+        const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
 
-      await rwfs.chmod("/file.txt", 0o755);
+        await rwfs.chmod("/file.txt", 0o755);
 
-      const stat = fs.statSync(path.join(tempDir, "file.txt"));
-      expect(stat.mode & 0o777).toBe(0o755);
-    });
+        const stat = fs.statSync(path.join(tempDir, "file.txt"));
+        expect(stat.mode & 0o777).toBe(0o755);
+      },
+    );
 
     it("should throw ENOENT for non-existent file", async () => {
       const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
       await expect(rwfs.chmod("/nonexistent", 0o755)).rejects.toThrow("ENOENT");
     });
 
-    it("should preserve special mode bits through replacement", async () => {
-      const filePath = path.join(tempDir, "special-mode.txt");
-      fs.writeFileSync(filePath, "content");
-      const rwfs = new ReadWriteFs({ root: tempDir });
+    // set-user-ID/set-group-ID bits do not exist on win32.
+    it.skipIf(process.platform === "win32")(
+      "should preserve special mode bits through replacement",
+      async () => {
+        const filePath = path.join(tempDir, "special-mode.txt");
+        fs.writeFileSync(filePath, "content");
+        const rwfs = new ReadWriteFs({ root: tempDir });
 
-      await rwfs.chmod("/special-mode.txt", 0o4755);
+        await rwfs.chmod("/special-mode.txt", 0o4755);
 
-      expect(fs.statSync(filePath).mode & 0o7777).toBe(0o4755);
-    });
+        expect(fs.statSync(filePath).mode & 0o7777).toBe(0o4755);
+      },
+    );
 
     it("should allow metadata operations above maxFileReadSize", async () => {
       const filePath = path.join(tempDir, "large-metadata.txt");
@@ -417,7 +427,11 @@ describe("ReadWriteFs", () => {
       await rwfs.utimes("/large-metadata.txt", changed, changed);
 
       const stat = fs.statSync(filePath);
-      expect(stat.mode & 0o777).toBe(0o700);
+      // POSIX mode bits are fictional on win32; the utimes part of this
+      // test remains meaningful there.
+      if (process.platform !== "win32") {
+        expect(stat.mode & 0o777).toBe(0o700);
+      }
       expect(stat.mtimeMs).toBe(changed.getTime());
     });
   });
@@ -446,19 +460,23 @@ describe("ReadWriteFs", () => {
       );
     });
 
-    it("should write through an allowed dangling symlink within the root", async () => {
-      fs.symlinkSync("target.txt", path.join(tempDir, "link.txt"));
-      const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "should write through an allowed dangling symlink within the root",
+      async () => {
+        fs.symlinkSync("target.txt", path.join(tempDir, "link.txt"));
+        const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
 
-      await rwfs.writeFile("/link.txt", "created");
+        await rwfs.writeFile("/link.txt", "created");
 
-      expect(fs.readlinkSync(path.join(tempDir, "link.txt"))).toBe(
-        "target.txt",
-      );
-      expect(fs.readFileSync(path.join(tempDir, "target.txt"), "utf8")).toBe(
-        "created",
-      );
-    });
+        expect(fs.readlinkSync(path.join(tempDir, "link.txt"))).toBe(
+          "target.txt",
+        );
+        expect(fs.readFileSync(path.join(tempDir, "target.txt"), "utf8")).toBe(
+          "created",
+        );
+      },
+    );
   });
 
   describe("link", () => {
@@ -607,23 +625,27 @@ describe("ReadWriteFs", () => {
       expect(names).toEqual(["Banana.txt", "Zebra.txt", "apple.txt"]);
     });
 
-    it("should identify symlinks correctly", async () => {
-      const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "should identify symlinks correctly",
+      async () => {
+        const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });
 
-      fs.writeFileSync(path.join(tempDir, "real.txt"), "content");
-      fs.symlinkSync(
-        path.join(tempDir, "real.txt"),
-        path.join(tempDir, "link.txt"),
-      );
+        fs.writeFileSync(path.join(tempDir, "real.txt"), "content");
+        fs.symlinkSync(
+          path.join(tempDir, "real.txt"),
+          path.join(tempDir, "link.txt"),
+        );
 
-      const entries = await rwfs.readdirWithFileTypes("/");
+        const entries = await rwfs.readdirWithFileTypes("/");
 
-      const link = entries.find((e) => e.name === "link.txt");
-      expect(link).toBeDefined();
-      expect(link?.isFile).toBe(false);
-      expect(link?.isDirectory).toBe(false);
-      expect(link?.isSymbolicLink).toBe(true);
-    });
+        const link = entries.find((e) => e.name === "link.txt");
+        expect(link).toBeDefined();
+        expect(link?.isFile).toBe(false);
+        expect(link?.isDirectory).toBe(false);
+        expect(link?.isSymbolicLink).toBe(true);
+      },
+    );
 
     it("should throw ENOENT for non-existent directory", async () => {
       const rwfs = new ReadWriteFs({ root: tempDir, allowSymlinks: true });

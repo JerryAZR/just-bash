@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import * as nodeModule from "node:module";
-import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DefenseInDepthBox,
@@ -77,9 +76,11 @@ describe.runIf(typeof nodeModule.registerHooks === "function")(
 describe.runIf(typeof nodeModule.registerHooks === "function")(
   "defense-in-depth Module discovery",
   () => {
-    const sourceUrl = pathToFileURL(
-      new URL("./defense-in-depth-box.ts", import.meta.url).pathname,
-    ).href;
+    // import.meta.url is already a correct file URL on every platform;
+    // routing it through .pathname + pathToFileURL double-prefixes the
+    // drive letter on win32 (file:///C:/C:/...).
+    const sourceUrl = new URL("./defense-in-depth-box.ts", import.meta.url)
+      .href;
 
     function runSubprocess(inputType: "module" | "commonjs", body: string) {
       return execFileSync(
@@ -131,8 +132,9 @@ describe.runIf(typeof nodeModule.registerHooks === "function")(
     });
 
     it("rolls back worker patches when bootstrap activation fails", () => {
-      const workerSourceUrl = pathToFileURL(
-        new URL("./worker-defense-in-depth.ts", import.meta.url).pathname,
+      const workerSourceUrl = new URL(
+        "./worker-defense-in-depth.ts",
+        import.meta.url,
       ).href;
       const body = `(async () => {
       const { Module } = await import("node:module");

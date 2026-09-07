@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { canCreateSymlinks } from "../test-utils/fs-env.js";
 import type { IFileSystem } from "./interface.js";
 import { OverlayFs } from "./overlay-fs/overlay-fs.js";
 import { ReadWriteFs } from "./read-write-fs/read-write-fs.js";
@@ -214,26 +215,34 @@ describe.each([
   // 3. Symlink to filesystem root /
   // -----------------------------------------------------------------------
   describe("symlink targeting /", () => {
-    it("cannot read /etc/passwd through symlink to /", async () => {
-      await ctx.fsImpl.symlink("/", "/root-link");
-      // Following symlink to / should scope to virtual /, which is the sandbox root
-      // Reading /root-link/etc/passwd should fail
-      await expect(
-        ctx.fsImpl.readFile("/root-link/etc/passwd"),
-      ).rejects.toThrow();
-    });
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "cannot read /etc/passwd through symlink to /",
+      async () => {
+        await ctx.fsImpl.symlink("/", "/root-link");
+        // Following symlink to / should scope to virtual /, which is the sandbox root
+        // Reading /root-link/etc/passwd should fail
+        await expect(
+          ctx.fsImpl.readFile("/root-link/etc/passwd"),
+        ).rejects.toThrow();
+      },
+    );
 
-    it("cannot list real filesystem entries through symlink to /", async () => {
-      await ctx.fsImpl.symlink("/", "/root-link");
-      try {
-        const entries = await ctx.fsImpl.readdir("/root-link");
-        // Should be sandbox contents, not real /
-        expect(entries).not.toContain("etc");
-        expect(entries).not.toContain("usr");
-      } catch {
-        // Throwing is also safe
-      }
-    });
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "cannot list real filesystem entries through symlink to /",
+      async () => {
+        await ctx.fsImpl.symlink("/", "/root-link");
+        try {
+          const entries = await ctx.fsImpl.readdir("/root-link");
+          // Should be sandbox contents, not real /
+          expect(entries).not.toContain("etc");
+          expect(entries).not.toContain("usr");
+        } catch {
+          // Throwing is also safe
+        }
+      },
+    );
   });
 
   // -----------------------------------------------------------------------
@@ -864,49 +873,62 @@ describe.each([
   // 25. Symlink whose target is literally ".."
   // -----------------------------------------------------------------------
   describe("symlink with target '..'", () => {
-    it("symlink to '..' does not escape sandbox", async () => {
-      await ctx.fsImpl.symlink("..", "/dotdot-link");
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "symlink to '..' does not escape sandbox",
+      async () => {
+        await ctx.fsImpl.symlink("..", "/dotdot-link");
 
-      // Following the symlink from root should resolve to root (clamped)
-      try {
-        const entries = await ctx.fsImpl.readdir("/dotdot-link");
-        // Must be sandbox contents, not parent directory
-        expect(entries).toContain("hello.txt");
-        expect(entries).not.toContain("secret.txt");
-      } catch {
-        // Throwing is also safe
-      }
-    });
+        // Following the symlink from root should resolve to root (clamped)
+        try {
+          const entries = await ctx.fsImpl.readdir("/dotdot-link");
+          // Must be sandbox contents, not parent directory
+          expect(entries).toContain("hello.txt");
+          expect(entries).not.toContain("secret.txt");
+        } catch {
+          // Throwing is also safe
+        }
+      },
+    );
 
-    it("symlink to '..' from subdir resolves within sandbox", async () => {
-      await ctx.fsImpl.mkdir("/deep/dir", { recursive: true });
-      await ctx.fsImpl.symlink("..", "/deep/dir/up-link");
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "symlink to '..' from subdir resolves within sandbox",
+      async () => {
+        await ctx.fsImpl.mkdir("/deep/dir", { recursive: true });
+        await ctx.fsImpl.symlink("..", "/deep/dir/up-link");
 
-      try {
-        const entries = await ctx.fsImpl.readdir("/deep/dir/up-link");
-        // Should resolve to /deep, not escape
-        expect(entries).not.toContain("secret.txt");
-      } catch {
-        // Throwing is safe
-      }
-    });
+        try {
+          const entries = await ctx.fsImpl.readdir("/deep/dir/up-link");
+          // Should resolve to /deep, not escape
+          expect(entries).not.toContain("secret.txt");
+        } catch {
+          // Throwing is safe
+        }
+      },
+    );
   });
 
   // -----------------------------------------------------------------------
   // 26. Long symlink chain — ELOOP detection
   // -----------------------------------------------------------------------
   describe("long symlink chain ELOOP detection", () => {
-    it("detects loop in 40+ hop chain", async () => {
-      // Create a chain: link0 -> link1 -> link2 -> ... -> link39 -> link0
-      for (let i = 0; i < 40; i++) {
-        const target = `/chain-link${(i + 1) % 40}`;
-        await ctx.fsImpl.symlink(target, `/chain-link${i}`);
-      }
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "detects loop in 40+ hop chain",
+      async () => {
+        // Create a chain: link0 -> link1 -> link2 -> ... -> link39 -> link0
+        for (let i = 0; i < 40; i++) {
+          const target = `/chain-link${(i + 1) % 40}`;
+          await ctx.fsImpl.symlink(target, `/chain-link${i}`);
+        }
 
-      await expect(ctx.fsImpl.readFile("/chain-link0")).rejects.toThrow();
-    });
+        await expect(ctx.fsImpl.readFile("/chain-link0")).rejects.toThrow();
+      },
+    );
 
-    it("detects mutual symlink loop", async () => {
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())("detects mutual symlink loop", async () => {
       await ctx.fsImpl.symlink("/ping", "/pong");
       await ctx.fsImpl.symlink("/pong", "/ping");
 
@@ -980,18 +1002,22 @@ describe.each([
   // 30. Deeply nested relative symlink that traverses out and back in
   // -----------------------------------------------------------------------
   describe("relative symlink out-and-back", () => {
-    it("relative symlink ../../sub/nested.txt from /a/b/ stays safe", async () => {
-      await ctx.fsImpl.mkdir("/a/b", { recursive: true });
-      await ctx.fsImpl.symlink("../../sub/nested.txt", "/a/b/tricky-link");
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "relative symlink ../../sub/nested.txt from /a/b/ stays safe",
+      async () => {
+        await ctx.fsImpl.mkdir("/a/b", { recursive: true });
+        await ctx.fsImpl.symlink("../../sub/nested.txt", "/a/b/tricky-link");
 
-      try {
-        const content = await ctx.fsImpl.readFile("/a/b/tricky-link");
-        // Resolves to /sub/nested.txt — inside sandbox
-        expect(content).toBe("nested");
-      } catch {
-        // Throwing is also acceptable (path may not resolve on real FS)
-      }
-    });
+        try {
+          const content = await ctx.fsImpl.readFile("/a/b/tricky-link");
+          // Resolves to /sub/nested.txt — inside sandbox
+          expect(content).toBe("nested");
+        } catch {
+          // Throwing is also acceptable (path may not resolve on real FS)
+        }
+      },
+    );
   });
 
   // -----------------------------------------------------------------------
@@ -1178,14 +1204,18 @@ describe.each([
       await expect(ctx.fsImpl.stat("/self-ref")).rejects.toThrow();
     });
 
-    it("memory-layer self-referencing symlink throws", async () => {
-      await ctx.fsImpl.symlink("/mem-self", "/mem-self");
-      // ReadWriteFs creates a real self-referencing symlink → realpathSync
-      // returns ELOOP → resolveCanonicalPath returns null → EACCES.
-      // OverlayFs resolves in memory → seen set detects loop → ELOOP.
-      // Either error code is safe — the key invariant is no hang.
-      await expect(ctx.fsImpl.readFile("/mem-self")).rejects.toThrow();
-    });
+    // Requires symlink privilege (unavailable to unprivileged win32).
+    it.skipIf(!canCreateSymlinks())(
+      "memory-layer self-referencing symlink throws",
+      async () => {
+        await ctx.fsImpl.symlink("/mem-self", "/mem-self");
+        // ReadWriteFs creates a real self-referencing symlink → realpathSync
+        // returns ELOOP → resolveCanonicalPath returns null → EACCES.
+        // OverlayFs resolves in memory → seen set detects loop → ELOOP.
+        // Either error code is safe — the key invariant is no hang.
+        await expect(ctx.fsImpl.readFile("/mem-self")).rejects.toThrow();
+      },
+    );
   });
 
   // -----------------------------------------------------------------------

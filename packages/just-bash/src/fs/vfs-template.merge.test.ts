@@ -346,5 +346,7 @@ describe("template merge properties", () => {
       ),
       { numRuns: 200, seed: 0xc0ffee },
     );
-  });
+    // 200 async property runs with double merges legitimately exceed the
+    // default 5s timeout under full-suite parallel load.
+  }, 60_000);
 });

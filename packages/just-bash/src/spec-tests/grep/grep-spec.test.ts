@@ -47,7 +47,10 @@ describe("Grep Spec Tests", () => {
 
     describe(fileName, () => {
       // Parse the test file
-      const content = fs.readFileSync(filePath, "utf-8");
+      // Normalize CRLF: on win32 the case files may be checked out with
+      // core.autocrlf=true, which would otherwise pollute both the executed
+      // scripts and the expected outputs with stray CR characters.
+      const content = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
       const parsed = parseGrepTestFile(content, filePath);
 
       // Skip files with no parseable tests

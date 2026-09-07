@@ -24,6 +24,9 @@ describe("published package declarations", () => {
           cwd: packageRoot,
           env: { ...process.env, npm_config_cache: npmCache },
           maxBuffer: 10 * 1024 * 1024,
+          // npm is a .cmd shim on win32, which execFile cannot spawn
+          // directly; go through the shell there.
+          shell: process.platform === "win32",
         },
       );
       const [pack] = JSON.parse(stdout) as PackResult[];

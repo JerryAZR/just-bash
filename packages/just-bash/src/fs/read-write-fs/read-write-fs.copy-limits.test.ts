@@ -94,28 +94,34 @@ describe("ReadWriteFs copy limits and permissions", () => {
     expect(fs.existsSync(path.join(root, "copy.txt"))).toBe(false);
   });
 
-  it("opens copy sources without blocking on a file-type race", async () => {
-    const source = path.join(root, "source.txt");
-    fs.writeFileSync(source, "content");
-    const canonicalSource = fs.realpathSync(source);
-    const attemptedFlags: number[] = [];
-    const originalOpen = fs.promises.open.bind(fs.promises);
-    vi.spyOn(fs.promises, "open").mockImplementation(
-      async (filePath, flags, mode) => {
-        if (filePath === canonicalSource && typeof flags === "number") {
-          attemptedFlags.push(flags);
-        }
-        return originalOpen(filePath, flags, mode);
-      },
-    );
+  // Asserts O_NONBLOCK on copy-source opens; the flag does not exist on win32.
+  it.skipIf(process.platform === "win32")(
+    "opens copy sources without blocking on a file-type race",
+    async () => {
+      const source = path.join(root, "source.txt");
+      fs.writeFileSync(source, "content");
+      const canonicalSource = fs.realpathSync(source);
+      const attemptedFlags: number[] = [];
+      const originalOpen = fs.promises.open.bind(fs.promises);
+      vi.spyOn(fs.promises, "open").mockImplementation(
+        async (filePath, flags, mode) => {
+          if (filePath === canonicalSource && typeof flags === "number") {
+            attemptedFlags.push(flags);
+          }
+          return originalOpen(filePath, flags, mode);
+        },
+      );
 
-    await new ReadWriteFs({ root }).cp("/source.txt", "/copy.txt");
+      await new ReadWriteFs({ root }).cp("/source.txt", "/copy.txt");
 
-    expect(attemptedFlags.length).toBeGreaterThan(0);
-    expect(
-      attemptedFlags.every((flags) => (flags & fs.constants.O_NONBLOCK) !== 0),
-    ).toBe(true);
-  });
+      expect(attemptedFlags.length).toBeGreaterThan(0);
+      expect(
+        attemptedFlags.every(
+          (flags) => (flags & fs.constants.O_NONBLOCK) !== 0,
+        ),
+      ).toBe(true);
+    },
+  );
 
   it.skipIf(fs.constants.O_NOATIME !== undefined)(
     "does not synthesize an O_NOATIME flag absent from the runtime",

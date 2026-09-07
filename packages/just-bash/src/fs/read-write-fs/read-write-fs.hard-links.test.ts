@@ -50,32 +50,42 @@ describe("ReadWriteFs host-planted hard-link containment", () => {
     expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
   });
 
-  it("contains append by copying and replacing the sandbox entry", async () => {
-    const oldAtime = new Date("2020-01-01T00:00:00.000Z");
-    const oldMtime = new Date("2020-01-02T00:00:00.000Z");
-    fs.utimesSync(outsideFile, oldAtime, oldMtime);
+  // Copy-on-write containment stages the replacement while holding the source open, then rename()s over it; win32 cannot rename over an open file (EPERM), so this mechanism is POSIX-only.
+  it.skipIf(process.platform === "win32")(
+    "contains append by copying and replacing the sandbox entry",
+    async () => {
+      const oldAtime = new Date("2020-01-01T00:00:00.000Z");
+      const oldMtime = new Date("2020-01-02T00:00:00.000Z");
+      fs.utimesSync(outsideFile, oldAtime, oldMtime);
 
-    await rwfs.appendFile("/linked.txt", "-sandbox");
+      await rwfs.appendFile("/linked.txt", "-sandbox");
 
-    if (process.platform === "linux") {
-      expect(fs.statSync(outsideFile).atimeMs).toBe(oldAtime.getTime());
-    }
-    expect(fs.readFileSync(linkedFile, "utf8")).toBe("outside-sandbox");
-    expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
-    expect(fs.statSync(linkedFile).ino).not.toBe(fs.statSync(outsideFile).ino);
-  });
+      if (process.platform === "linux") {
+        expect(fs.statSync(outsideFile).atimeMs).toBe(oldAtime.getTime());
+      }
+      expect(fs.readFileSync(linkedFile, "utf8")).toBe("outside-sandbox");
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
+      expect(fs.statSync(linkedFile).ino).not.toBe(
+        fs.statSync(outsideFile).ino,
+      );
+    },
+  );
 
-  it("does not apply the read-size limit to copy-on-write append", async () => {
-    const limited = new ReadWriteFs({
-      root: sandboxDir,
-      maxFileReadSize: 4,
-    });
+  // Copy-on-write containment stages the replacement while holding the source open, then rename()s over it; win32 cannot rename over an open file (EPERM), so this mechanism is POSIX-only.
+  it.skipIf(process.platform === "win32")(
+    "does not apply the read-size limit to copy-on-write append",
+    async () => {
+      const limited = new ReadWriteFs({
+        root: sandboxDir,
+        maxFileReadSize: 4,
+      });
 
-    await limited.appendFile("/linked.txt", "-sandbox");
+      await limited.appendFile("/linked.txt", "-sandbox");
 
-    expect(fs.readFileSync(linkedFile, "utf8")).toBe("outside-sandbox");
-    expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
-  });
+      expect(fs.readFileSync(linkedFile, "utf8")).toBe("outside-sandbox");
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
+    },
+  );
 
   it("serializes concurrent appends without losing updates", async () => {
     const target = path.join(sandboxDir, "concurrent.txt");
@@ -144,34 +154,46 @@ describe("ReadWriteFs host-planted hard-link containment", () => {
     expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
   });
 
-  it("contains chmod on a multiply-linked file", async () => {
-    const preservedAtime = new Date("2020-02-01T00:00:00.000Z");
-    const preservedMtime = new Date("2020-02-02T00:00:00.000Z");
-    fs.utimesSync(outsideFile, preservedAtime, preservedMtime);
-    const originalStat = fs.statSync(outsideFile);
-    const originalMode = originalStat.mode & 0o7777;
+  // Copy-on-write containment stages the replacement while holding the source open, then rename()s over it; win32 cannot rename over an open file (EPERM), so this mechanism is POSIX-only.
+  it.skipIf(process.platform === "win32")(
+    "contains chmod on a multiply-linked file",
+    async () => {
+      const preservedAtime = new Date("2020-02-01T00:00:00.000Z");
+      const preservedMtime = new Date("2020-02-02T00:00:00.000Z");
+      fs.utimesSync(outsideFile, preservedAtime, preservedMtime);
+      const originalStat = fs.statSync(outsideFile);
+      const originalMode = originalStat.mode & 0o7777;
 
-    await rwfs.chmod("/linked.txt", 0o4755);
+      await rwfs.chmod("/linked.txt", 0o4755);
 
-    expect(fs.statSync(outsideFile).mode & 0o7777).toBe(originalMode);
-    expect(fs.statSync(outsideFile).mtimeMs).toBe(originalStat.mtimeMs);
-    expect(fs.statSync(linkedFile).mode & 0o7777).toBe(0o4755);
-    expect(fs.statSync(linkedFile).atimeMs).toBe(preservedAtime.getTime());
-    expect(fs.statSync(linkedFile).mtimeMs).toBe(preservedMtime.getTime());
-    expect(fs.statSync(linkedFile).ino).not.toBe(fs.statSync(outsideFile).ino);
-  });
+      expect(fs.statSync(outsideFile).mode & 0o7777).toBe(originalMode);
+      expect(fs.statSync(outsideFile).mtimeMs).toBe(originalStat.mtimeMs);
+      expect(fs.statSync(linkedFile).mode & 0o7777).toBe(0o4755);
+      expect(fs.statSync(linkedFile).atimeMs).toBe(preservedAtime.getTime());
+      expect(fs.statSync(linkedFile).mtimeMs).toBe(preservedMtime.getTime());
+      expect(fs.statSync(linkedFile).ino).not.toBe(
+        fs.statSync(outsideFile).ino,
+      );
+    },
+  );
 
-  it("contains utimes on a multiply-linked file", async () => {
-    const originalAtime = new Date("2020-03-01T00:00:00.000Z");
-    const originalMtimeDate = new Date("2020-03-02T00:00:00.000Z");
-    fs.utimesSync(outsideFile, originalAtime, originalMtimeDate);
-    const originalMtime = fs.statSync(outsideFile).mtimeMs;
-    const changed = new Date("2020-03-03T00:00:00.000Z");
+  // Copy-on-write containment stages the replacement while holding the source open, then rename()s over it; win32 cannot rename over an open file (EPERM), so this mechanism is POSIX-only.
+  it.skipIf(process.platform === "win32")(
+    "contains utimes on a multiply-linked file",
+    async () => {
+      const originalAtime = new Date("2020-03-01T00:00:00.000Z");
+      const originalMtimeDate = new Date("2020-03-02T00:00:00.000Z");
+      fs.utimesSync(outsideFile, originalAtime, originalMtimeDate);
+      const originalMtime = fs.statSync(outsideFile).mtimeMs;
+      const changed = new Date("2020-03-03T00:00:00.000Z");
 
-    await rwfs.utimes("/linked.txt", changed, changed);
+      await rwfs.utimes("/linked.txt", changed, changed);
 
-    expect(fs.statSync(outsideFile).mtimeMs).toBe(originalMtime);
-    expect(fs.statSync(linkedFile).mtimeMs).toBe(changed.getTime());
-    expect(fs.statSync(linkedFile).ino).not.toBe(fs.statSync(outsideFile).ino);
-  });
+      expect(fs.statSync(outsideFile).mtimeMs).toBe(originalMtime);
+      expect(fs.statSync(linkedFile).mtimeMs).toBe(changed.getTime());
+      expect(fs.statSync(linkedFile).ino).not.toBe(
+        fs.statSync(outsideFile).ino,
+      );
+    },
+  );
 });

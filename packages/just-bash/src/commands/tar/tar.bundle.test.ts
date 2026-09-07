@@ -2,6 +2,10 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import {
+  canUseXzCompression,
+  canUseZstdCompression,
+} from "../../test-utils/fs-env.js";
 
 const execFileAsync = promisify(execFile);
 const binPath = resolve(__dirname, "../../../dist/bin/just-bash.js");
@@ -98,25 +102,35 @@ cat /tmp/bz2out/file.txt
     expect(result.exitCode).toBe(0);
   });
 
-  it("should preserve xz codec behavior by default", async () => {
-    const result = await runBin([
-      "-c",
-      `echo xz > /tmp/file.txt; tar -cJf /tmp/test.tar.xz -C /tmp file.txt; tar -tJf /tmp/test.tar.xz`,
-      "--allow-write",
-    ]);
-    expect(result.stdout).toContain("file.txt");
-    expect(result.exitCode).toBe(0);
-  });
+  // tar's codec requires an optional native module that is not
+  // loadable in this environment (no win32 prebuilds).
+  it.skipIf(!canUseXzCompression())(
+    "should preserve xz codec behavior by default",
+    async () => {
+      const result = await runBin([
+        "-c",
+        `echo xz > /tmp/file.txt; tar -cJf /tmp/test.tar.xz -C /tmp file.txt; tar -tJf /tmp/test.tar.xz`,
+        "--allow-write",
+      ]);
+      expect(result.stdout).toContain("file.txt");
+      expect(result.exitCode).toBe(0);
+    },
+  );
 
-  it("should preserve zstd codec behavior by default", async () => {
-    const result = await runBin([
-      "-c",
-      `echo zstd > /tmp/file.txt; tar --zstd -cf /tmp/test.tar.zst -C /tmp file.txt; tar --zstd -tf /tmp/test.tar.zst`,
-      "--allow-write",
-    ]);
-    expect(result.stdout).toContain("file.txt");
-    expect(result.exitCode).toBe(0);
-  });
+  // tar's codec requires an optional native module that is not
+  // loadable in this environment (no win32 prebuilds).
+  it.skipIf(!canUseZstdCompression())(
+    "should preserve zstd codec behavior by default",
+    async () => {
+      const result = await runBin([
+        "-c",
+        `echo zstd > /tmp/file.txt; tar --zstd -cf /tmp/test.tar.zst -C /tmp file.txt; tar --zstd -tf /tmp/test.tar.zst`,
+        "--allow-write",
+      ]);
+      expect(result.stdout).toContain("file.txt");
+      expect(result.exitCode).toBe(0);
+    },
+  );
 
   it("should auto-detect compression from filename (-a)", async () => {
     const result = await runBin([

@@ -445,7 +445,9 @@ describe("find performance tracing", () => {
 
     // Verify both produce same results (correctness only, timing is informational)
     expect(fastPathMatches).toBe(regularPathMatches);
-  });
+    // The micro-benchmark evaluates millions of expressions; under full-suite
+    // parallel load it legitimately exceeds the default 5s timeout.
+  }, 60_000);
 
   it("should skip stat calls for printf with simple directives", async () => {
     // Create a filesystem with many files

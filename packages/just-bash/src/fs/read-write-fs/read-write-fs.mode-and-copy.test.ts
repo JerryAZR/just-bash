@@ -18,51 +18,67 @@ describe("ReadWriteFs replacement mode and copy behavior", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("clears set-user-ID and set-group-ID bits on overwrite", async () => {
-    const target = path.join(root, "overwrite.sh");
-    fs.writeFileSync(target, "old");
-    fs.chmodSync(target, 0o6755);
+  // Asserts exact POSIX mode bits, which are fictional on win32 (only the read-only bit exists).
+  it.skipIf(process.platform === "win32")(
+    "clears set-user-ID and set-group-ID bits on overwrite",
+    async () => {
+      const target = path.join(root, "overwrite.sh");
+      fs.writeFileSync(target, "old");
+      fs.chmodSync(target, 0o6755);
 
-    await rwfs.writeFile("/overwrite.sh", "new");
+      await rwfs.writeFile("/overwrite.sh", "new");
 
-    expect(fs.readFileSync(target, "utf8")).toBe("new");
-    expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
-  });
+      expect(fs.readFileSync(target, "utf8")).toBe("new");
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
+    },
+  );
 
-  it("clears set-user-ID and set-group-ID bits on append", async () => {
-    const target = path.join(root, "append.sh");
-    fs.writeFileSync(target, "old");
-    fs.chmodSync(target, 0o6755);
+  // Asserts exact POSIX mode bits, which are fictional on win32 (only the read-only bit exists).
+  it.skipIf(process.platform === "win32")(
+    "clears set-user-ID and set-group-ID bits on append",
+    async () => {
+      const target = path.join(root, "append.sh");
+      fs.writeFileSync(target, "old");
+      fs.chmodSync(target, 0o6755);
 
-    await rwfs.appendFile("/append.sh", "new");
+      await rwfs.appendFile("/append.sh", "new");
 
-    expect(fs.readFileSync(target, "utf8")).toBe("oldnew");
-    expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
-  });
+      expect(fs.readFileSync(target, "utf8")).toBe("oldnew");
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
+    },
+  );
 
-  it("does not propagate special mode bits from a copied source", async () => {
-    const source = path.join(root, "source.sh");
-    const destination = path.join(root, "destination.sh");
-    fs.writeFileSync(source, "content");
-    fs.chmodSync(source, 0o6755);
+  // Asserts exact POSIX mode bits, which are fictional on win32 (only the read-only bit exists).
+  it.skipIf(process.platform === "win32")(
+    "does not propagate special mode bits from a copied source",
+    async () => {
+      const source = path.join(root, "source.sh");
+      const destination = path.join(root, "destination.sh");
+      fs.writeFileSync(source, "content");
+      fs.chmodSync(source, 0o6755);
 
-    await rwfs.cp("/source.sh", "/destination.sh");
+      await rwfs.cp("/source.sh", "/destination.sh");
 
-    expect(fs.statSync(source).mode & 0o7777).toBe(0o6755);
-    expect(fs.statSync(destination).mode & 0o7777).toBe(0o755);
-  });
+      expect(fs.statSync(source).mode & 0o7777).toBe(0o6755);
+      expect(fs.statSync(destination).mode & 0o7777).toBe(0o755);
+    },
+  );
 
-  it("preserves special mode bits during metadata-only utimes", async () => {
-    const target = path.join(root, "metadata.sh");
-    const changed = new Date("2020-06-01T00:00:00.000Z");
-    fs.writeFileSync(target, "content");
-    fs.chmodSync(target, 0o4755);
+  // Asserts exact POSIX mode bits, which are fictional on win32 (only the read-only bit exists).
+  it.skipIf(process.platform === "win32")(
+    "preserves special mode bits during metadata-only utimes",
+    async () => {
+      const target = path.join(root, "metadata.sh");
+      const changed = new Date("2020-06-01T00:00:00.000Z");
+      fs.writeFileSync(target, "content");
+      fs.chmodSync(target, 0o4755);
 
-    await rwfs.utimes("/metadata.sh", changed, changed);
+      await rwfs.utimes("/metadata.sh", changed, changed);
 
-    expect(fs.statSync(target).mode & 0o7777).toBe(0o4755);
-    expect(fs.statSync(target).mtimeMs).toBe(changed.getTime());
-  });
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o4755);
+      expect(fs.statSync(target).mtimeMs).toBe(changed.getTime());
+    },
+  );
 
   it("appends beyond the default read-size limit", async () => {
     const target = path.join(root, "large.log");

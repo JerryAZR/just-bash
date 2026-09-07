@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { canCreateSymlinks } from "../../test-utils/fs-env.js";
 import { ReadWriteFs } from "./read-write-fs.js";
 
 function errno(code: string, hostPath: string): NodeJS.ErrnoException {
@@ -135,16 +136,20 @@ describe("ReadWriteFs mv transaction", () => {
     expect(fs.readdirSync(root).sort()).toEqual(["dest", "source"]);
   });
 
-  it("rejects a symlink-spelled descendant using canonical identity", async () => {
-    fs.mkdirSync(path.join(root, "source"));
-    fs.writeFileSync(path.join(root, "source", "keep.txt"), "keep");
-    fs.symlinkSync(path.join(root, "source"), path.join(root, "alias"));
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "rejects a symlink-spelled descendant using canonical identity",
+    async () => {
+      fs.mkdirSync(path.join(root, "source"));
+      fs.writeFileSync(path.join(root, "source", "keep.txt"), "keep");
+      fs.symlinkSync(path.join(root, "source"), path.join(root, "alias"));
 
-    await expect(adapter.mv("/source", "/alias/child")).rejects.toThrow(
-      "cannot move '/source' into itself",
-    );
-    expect(fs.readFileSync(path.join(root, "source", "keep.txt"), "utf8")).toBe(
-      "keep",
-    );
-  });
+      await expect(adapter.mv("/source", "/alias/child")).rejects.toThrow(
+        "cannot move '/source' into itself",
+      );
+      expect(
+        fs.readFileSync(path.join(root, "source", "keep.txt"), "utf8"),
+      ).toBe("keep");
+    },
+  );
 });

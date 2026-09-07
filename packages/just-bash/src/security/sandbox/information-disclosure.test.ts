@@ -74,8 +74,14 @@ describe("Information Disclosure Prevention", () => {
       const result = await bash.exec(`
         whoami 2>&1 || echo "whoami handled"
       `);
-      // Should not return actual system username
-      expect(result.stdout).not.toContain(process.env.USER || "");
+      // Should not return actual system username. POSIX exposes it as
+      // $USER, win32 as $USERNAME; when neither is set there is no username
+      // to leak and nothing to assert (asserting not.toContain("") would
+      // vacuously fail on every string).
+      const realUsername = process.env.USER ?? process.env.USERNAME;
+      if (realUsername) {
+        expect(result.stdout).not.toContain(realUsername);
+      }
     });
 
     it("should handle uname command safely", async () => {

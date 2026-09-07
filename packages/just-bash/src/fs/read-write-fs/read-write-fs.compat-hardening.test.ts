@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { canCreateSymlinks } from "../../test-utils/fs-env.js";
 import { ReadWriteFs } from "./read-write-fs.js";
 
 describe("ReadWriteFs compatibility hardening", () => {
@@ -15,52 +16,68 @@ describe("ReadWriteFs compatibility hardening", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("preserves an absolute symlink's immediate in-root target", async () => {
-    fs.writeFileSync(path.join(root, "first.txt"), "first");
-    fs.writeFileSync(path.join(root, "second.txt"), "second");
-    const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
-    await rwfs.symlink("/first.txt", "/intermediate");
-    await rwfs.symlink("/intermediate", "/source-link");
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "preserves an absolute symlink's immediate in-root target",
+    async () => {
+      fs.writeFileSync(path.join(root, "first.txt"), "first");
+      fs.writeFileSync(path.join(root, "second.txt"), "second");
+      const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
+      await rwfs.symlink("/first.txt", "/intermediate");
+      await rwfs.symlink("/intermediate", "/source-link");
 
-    await rwfs.cp("/source-link", "/copied-link");
+      await rwfs.cp("/source-link", "/copied-link");
 
-    const sourceTarget = fs.readlinkSync(path.join(root, "source-link"));
-    expect(fs.readlinkSync(path.join(root, "copied-link"))).toBe(sourceTarget);
-    await rwfs.rm("/intermediate");
-    await rwfs.symlink("/second.txt", "/intermediate");
-    expect(fs.readFileSync(path.join(root, "copied-link"), "utf8")).toBe(
-      "second",
-    );
-  });
+      const sourceTarget = fs.readlinkSync(path.join(root, "source-link"));
+      expect(fs.readlinkSync(path.join(root, "copied-link"))).toBe(
+        sourceTarget,
+      );
+      await rwfs.rm("/intermediate");
+      await rwfs.symlink("/second.txt", "/intermediate");
+      expect(fs.readFileSync(path.join(root, "copied-link"), "utf8")).toBe(
+        "second",
+      );
+    },
+  );
 
-  it("preserves an existing copy destination's permission bits", async () => {
-    fs.writeFileSync(path.join(root, "source.txt"), "new");
-    fs.chmodSync(path.join(root, "source.txt"), 0o755);
-    fs.writeFileSync(path.join(root, "destination.txt"), "old");
-    fs.chmodSync(path.join(root, "destination.txt"), 0o600);
-    const rwfs = new ReadWriteFs({ root });
+  // Asserts exact POSIX mode bits, which are fictional on win32 (only the read-only bit exists).
+  it.skipIf(process.platform === "win32")(
+    "preserves an existing copy destination's permission bits",
+    async () => {
+      fs.writeFileSync(path.join(root, "source.txt"), "new");
+      fs.chmodSync(path.join(root, "source.txt"), 0o755);
+      fs.writeFileSync(path.join(root, "destination.txt"), "old");
+      fs.chmodSync(path.join(root, "destination.txt"), 0o600);
+      const rwfs = new ReadWriteFs({ root });
 
-    await rwfs.cp("/source.txt", "/destination.txt");
+      await rwfs.cp("/source.txt", "/destination.txt");
 
-    expect(fs.readFileSync(path.join(root, "destination.txt"), "utf8")).toBe(
-      "new",
-    );
-    expect(fs.statSync(path.join(root, "destination.txt")).mode & 0o777).toBe(
-      0o600,
-    );
-  });
+      expect(fs.readFileSync(path.join(root, "destination.txt"), "utf8")).toBe(
+        "new",
+      );
+      expect(fs.statSync(path.join(root, "destination.txt")).mode & 0o777).toBe(
+        0o600,
+      );
+    },
+  );
 
-  it("does not follow a dangling symlink when creating a directory", async () => {
-    fs.symlinkSync("created-through-link", path.join(root, "dangling"));
-    const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "does not follow a dangling symlink when creating a directory",
+    async () => {
+      fs.symlinkSync("created-through-link", path.join(root, "dangling"));
+      const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
 
-    await expect(rwfs.mkdir("/dangling")).rejects.toThrow("EEXIST");
+      await expect(rwfs.mkdir("/dangling")).rejects.toThrow("EEXIST");
 
-    expect(fs.lstatSync(path.join(root, "dangling")).isSymbolicLink()).toBe(
-      true,
-    );
-    expect(fs.existsSync(path.join(root, "created-through-link"))).toBe(false);
-  });
+      expect(fs.lstatSync(path.join(root, "dangling")).isSymbolicLink()).toBe(
+        true,
+      );
+      expect(fs.existsSync(path.join(root, "created-through-link"))).toBe(
+        false,
+      );
+    },
+  );
 
   it("retains EEXIST when creating the root directory", async () => {
     const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
@@ -68,20 +85,26 @@ describe("ReadWriteFs compatibility hardening", () => {
     await expect(rwfs.mkdir("/")).rejects.toThrow("EEXIST");
   });
 
-  it("does not follow a dangling symlink used as a hard-link name", async () => {
-    fs.writeFileSync(path.join(root, "source.txt"), "content");
-    fs.symlinkSync("created-through-link", path.join(root, "dangling"));
-    const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "does not follow a dangling symlink used as a hard-link name",
+    async () => {
+      fs.writeFileSync(path.join(root, "source.txt"), "content");
+      fs.symlinkSync("created-through-link", path.join(root, "dangling"));
+      const rwfs = new ReadWriteFs({ root, allowSymlinks: true });
 
-    await expect(rwfs.link("/source.txt", "/dangling")).rejects.toThrow(
-      "EEXIST",
-    );
+      await expect(rwfs.link("/source.txt", "/dangling")).rejects.toThrow(
+        "EEXIST",
+      );
 
-    expect(fs.lstatSync(path.join(root, "dangling")).isSymbolicLink()).toBe(
-      true,
-    );
-    expect(fs.existsSync(path.join(root, "created-through-link"))).toBe(false);
-  });
+      expect(fs.lstatSync(path.join(root, "dangling")).isSymbolicLink()).toBe(
+        true,
+      );
+      expect(fs.existsSync(path.join(root, "created-through-link"))).toBe(
+        false,
+      );
+    },
+  );
 
   it("ignores predictable staging-name collisions", async () => {
     const target = path.join(root, "shared.txt");

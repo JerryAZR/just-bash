@@ -13,7 +13,20 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { canCreateSymlinks } from "../../test-utils/fs-env.js";
 import { ReadWriteFs } from "./read-write-fs.js";
+
+/**
+ * Spell a host path as a POSIX-absolute virtual path, matching how the same
+ * path would be passed to the VFS on a POSIX host (e.g. /tmp/...). On win32
+ * the native spelling (C:\...) is not a valid virtual absolute path, so the
+ * drive and separators are converted to exercise the same in-root clamping
+ * logic cross-platform.
+ */
+function toVirtualAbsolutePath(p: string): string {
+  const { root } = path.parse(p);
+  return `/${p.slice(root.length).split(path.sep).join("/")}`;
+}
 
 describe("ReadWriteFs Security - Path Traversal Prevention", () => {
   let tempDir: string;
@@ -104,7 +117,7 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
 
     it("should not allow absolute path to write outside root", async () => {
       const targetPath = path.join(outsideDir, "pwned.txt");
-      await rwfs.writeFile(targetPath, "PWNED");
+      await rwfs.writeFile(toVirtualAbsolutePath(targetPath), "PWNED");
 
       // The real outside file should not exist
       expect(fs.existsSync(targetPath)).toBe(false);
@@ -119,7 +132,7 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
 
     it("should not allow appendFile outside root", async () => {
       // Create file outside and try to append
-      await rwfs.appendFile(outsideFile, "PWNED");
+      await rwfs.appendFile(toVirtualAbsolutePath(outsideFile), "PWNED");
 
       // The real outside file should be unchanged
       const realContent = fs.readFileSync(outsideFile, "utf8");
@@ -129,32 +142,38 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
   });
 
   describe("deletion security", () => {
-    it("removes an allowed symlink entry without deleting its file target", async () => {
-      const target = path.join(tempDir, "target.txt");
-      const link = path.join(tempDir, "target-link");
-      fs.writeFileSync(target, "preserve me");
-      fs.symlinkSync(target, link);
+    it.skipIf(!canCreateSymlinks())(
+      "removes an allowed symlink entry without deleting its file target",
+      async () => {
+        const target = path.join(tempDir, "target.txt");
+        const link = path.join(tempDir, "target-link");
+        fs.writeFileSync(target, "preserve me");
+        fs.symlinkSync(target, link);
 
-      await rwfs.rm("/target-link");
+        await rwfs.rm("/target-link");
 
-      expect(fs.existsSync(link)).toBe(false);
-      expect(fs.readFileSync(target, "utf8")).toBe("preserve me");
-    });
+        expect(fs.existsSync(link)).toBe(false);
+        expect(fs.readFileSync(target, "utf8")).toBe("preserve me");
+      },
+    );
 
-    it("removes an allowed symlink entry without recursively deleting its directory target", async () => {
-      const target = path.join(tempDir, "target-dir");
-      const link = path.join(tempDir, "target-dir-link");
-      fs.mkdirSync(target);
-      fs.writeFileSync(path.join(target, "keep.txt"), "preserve me");
-      fs.symlinkSync(target, link);
+    it.skipIf(!canCreateSymlinks())(
+      "removes an allowed symlink entry without recursively deleting its directory target",
+      async () => {
+        const target = path.join(tempDir, "target-dir");
+        const link = path.join(tempDir, "target-dir-link");
+        fs.mkdirSync(target);
+        fs.writeFileSync(path.join(target, "keep.txt"), "preserve me");
+        fs.symlinkSync(target, link);
 
-      await rwfs.rm("/target-dir-link", { recursive: true });
+        await rwfs.rm("/target-dir-link", { recursive: true });
 
-      expect(fs.existsSync(link)).toBe(false);
-      expect(fs.readFileSync(path.join(target, "keep.txt"), "utf8")).toBe(
-        "preserve me",
-      );
-    });
+        expect(fs.existsSync(link)).toBe(false);
+        expect(fs.readFileSync(path.join(target, "keep.txt"), "utf8")).toBe(
+          "preserve me",
+        );
+      },
+    );
 
     it("should not delete files outside root", async () => {
       // Try to delete the outside file
@@ -187,7 +206,7 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
 
       // This should NOT write to the real outside path
       const targetPath = path.join(outsideDir, "stolen.txt");
-      await rwfs.cp("/source.txt", targetPath);
+      await rwfs.cp("/source.txt", toVirtualAbsolutePath(targetPath));
 
       // Real outside directory should not have the file
       expect(fs.existsSync(targetPath)).toBe(false);
@@ -207,7 +226,7 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
       const targetPath = path.join(outsideDir, "moved.txt");
       // Note: mv to outside path maps to a deep nested path inside root
       // which may fail with ENOENT if parent dirs don't exist
-      await rwfs.mv("/to-move.txt", targetPath);
+      await rwfs.mv("/to-move.txt", toVirtualAbsolutePath(targetPath));
 
       // Real outside directory should not have the file
       expect(fs.existsSync(targetPath)).toBe(false);
@@ -662,21 +681,27 @@ describe("ReadWriteFs Security - Path Traversal Prevention", () => {
   });
 
   describe("realpath escape prevention", () => {
-    it("should throw when realpath resolves outside root via symlink", async () => {
-      // Create a symlink inside the sandbox pointing outside
-      const linkPath = path.join(tempDir, "escape-link");
-      fs.symlinkSync(outsideFile, linkPath);
+    it.skipIf(!canCreateSymlinks())(
+      "should throw when realpath resolves outside root via symlink",
+      async () => {
+        // Create a symlink inside the sandbox pointing outside
+        const linkPath = path.join(tempDir, "escape-link");
+        fs.symlinkSync(outsideFile, linkPath);
 
-      // realpath should throw, not leak the outside path
-      await expect(rwfs.realpath("/escape-link")).rejects.toThrow("ENOENT");
-    });
+        // realpath should throw, not leak the outside path
+        await expect(rwfs.realpath("/escape-link")).rejects.toThrow("ENOENT");
+      },
+    );
 
-    it("should throw when realpath resolves to parent directory via symlink", async () => {
-      const linkPath = path.join(tempDir, "parent-link");
-      fs.symlinkSync(outsideDir, linkPath);
+    it.skipIf(!canCreateSymlinks())(
+      "should throw when realpath resolves to parent directory via symlink",
+      async () => {
+        const linkPath = path.join(tempDir, "parent-link");
+        fs.symlinkSync(outsideDir, linkPath);
 
-      await expect(rwfs.realpath("/parent-link")).rejects.toThrow("ENOENT");
-    });
+        await expect(rwfs.realpath("/parent-link")).rejects.toThrow("ENOENT");
+      },
+    );
 
     it("should allow realpath for paths within root", async () => {
       const result = await rwfs.realpath("/allowed.txt");

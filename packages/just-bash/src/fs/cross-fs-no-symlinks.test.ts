@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { canCreateSymlinks } from "../test-utils/fs-env.js";
 import type { IFileSystem } from "./interface.js";
 import { OverlayFs } from "./overlay-fs/overlay-fs.js";
 import { ReadWriteFs } from "./read-write-fs/read-write-fs.js";
@@ -49,7 +50,10 @@ function setupReadWriteWithSymlinks(tempDir: string): IFileSystem {
 // ---------------------------------------------------------------------------
 // Parameterised test suite — default deny (allowSymlinks: false)
 // ---------------------------------------------------------------------------
-describe.each([
+// Every suite below plants real-FS symlinks in beforeEach, so the whole
+// suite honestly requires symlink privilege (not available to unprivileged
+// win32 processes).
+describe.skipIf(!canCreateSymlinks()).each([
   ["OverlayFs", setupOverlay],
   ["ReadWriteFs", setupReadWrite],
 ])("%s — default-deny symlinks", (_name, factory) => {
@@ -266,7 +270,7 @@ describe.each([
 // ---------------------------------------------------------------------------
 // Additional default-deny attack vectors
 // ---------------------------------------------------------------------------
-describe.each([
+describe.skipIf(!canCreateSymlinks()).each([
   ["OverlayFs", setupOverlay],
   ["ReadWriteFs", setupReadWrite],
 ])("%s — advanced default-deny attacks", (_name, factory) => {
@@ -502,7 +506,7 @@ describe.each([
 // ---------------------------------------------------------------------------
 // allowSymlinks: true restores full behavior
 // ---------------------------------------------------------------------------
-describe.each([
+describe.skipIf(!canCreateSymlinks()).each([
   ["OverlayFs", setupOverlayWithSymlinks],
   ["ReadWriteFs", setupReadWriteWithSymlinks],
 ])("%s — allowSymlinks: true restores behavior", (_name, factory) => {
@@ -543,7 +547,7 @@ describe.each([
 // ---------------------------------------------------------------------------
 // Security edge-case tests
 // ---------------------------------------------------------------------------
-describe.each([
+describe.skipIf(!canCreateSymlinks()).each([
   ["OverlayFs", setupOverlay],
   ["ReadWriteFs", setupReadWrite],
 ])("%s — security edge cases", (_name, factory) => {
@@ -796,13 +800,17 @@ describe("OverlayFs — O_NOFOLLOW TOCTOU protection (read path)", () => {
     fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("should reject readFile on a pre-existing symlink pointing outside", async () => {
-    fs.symlinkSync(
-      path.join(outsideDir, "secret.txt"),
-      path.join(tempDir, "sneaky-link"),
-    );
-    await expect(ofs.readFile("/sneaky-link")).rejects.toThrow();
-  });
+  // Requires symlink privilege (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "should reject readFile on a pre-existing symlink pointing outside",
+    async () => {
+      fs.symlinkSync(
+        path.join(outsideDir, "secret.txt"),
+        path.join(tempDir, "sneaky-link"),
+      );
+      await expect(ofs.readFile("/sneaky-link")).rejects.toThrow();
+    },
+  );
 
   it("should allow readFile on regular files", async () => {
     const content = await ofs.readFile("/safe.txt");
@@ -833,37 +841,48 @@ describe("ReadWriteFs — O_NOFOLLOW TOCTOU protection", () => {
     fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
-  it("should reject readFile on a pre-existing symlink (O_NOFOLLOW)", async () => {
-    // Create a symlink on real FS pointing outside
-    fs.symlinkSync(
-      path.join(outsideDir, "secret.txt"),
-      path.join(tempDir, "sneaky-link"),
-    );
-    await expect(rwfs.readFile("/sneaky-link")).rejects.toThrow();
-    // Verify the secret was NOT leaked
-  });
+  // The three O_NOFOLLOW symlink tests below require symlink privilege
+  // (unavailable to unprivileged win32).
+  it.skipIf(!canCreateSymlinks())(
+    "should reject readFile on a pre-existing symlink (O_NOFOLLOW)",
+    async () => {
+      // Create a symlink on real FS pointing outside
+      fs.symlinkSync(
+        path.join(outsideDir, "secret.txt"),
+        path.join(tempDir, "sneaky-link"),
+      );
+      await expect(rwfs.readFile("/sneaky-link")).rejects.toThrow();
+      // Verify the secret was NOT leaked
+    },
+  );
 
-  it("should reject writeFile on a pre-existing symlink (O_NOFOLLOW)", async () => {
-    fs.symlinkSync(
-      path.join(outsideDir, "target.txt"),
-      path.join(tempDir, "write-link"),
-    );
-    await expect(rwfs.writeFile("/write-link", "PWNED")).rejects.toThrow();
-    // Verify nothing was written outside
-    expect(fs.existsSync(path.join(outsideDir, "target.txt"))).toBe(false);
-  });
+  it.skipIf(!canCreateSymlinks())(
+    "should reject writeFile on a pre-existing symlink (O_NOFOLLOW)",
+    async () => {
+      fs.symlinkSync(
+        path.join(outsideDir, "target.txt"),
+        path.join(tempDir, "write-link"),
+      );
+      await expect(rwfs.writeFile("/write-link", "PWNED")).rejects.toThrow();
+      // Verify nothing was written outside
+      expect(fs.existsSync(path.join(outsideDir, "target.txt"))).toBe(false);
+    },
+  );
 
-  it("should reject appendFile on a pre-existing symlink (O_NOFOLLOW)", async () => {
-    fs.symlinkSync(
-      path.join(outsideDir, "secret.txt"),
-      path.join(tempDir, "append-link"),
-    );
-    await expect(rwfs.appendFile("/append-link", "PWNED")).rejects.toThrow();
-    // Verify original content not modified
-    expect(fs.readFileSync(path.join(outsideDir, "secret.txt"), "utf8")).toBe(
-      "TOP SECRET",
-    );
-  });
+  it.skipIf(!canCreateSymlinks())(
+    "should reject appendFile on a pre-existing symlink (O_NOFOLLOW)",
+    async () => {
+      fs.symlinkSync(
+        path.join(outsideDir, "secret.txt"),
+        path.join(tempDir, "append-link"),
+      );
+      await expect(rwfs.appendFile("/append-link", "PWNED")).rejects.toThrow();
+      // Verify original content not modified
+      expect(fs.readFileSync(path.join(outsideDir, "secret.txt"), "utf8")).toBe(
+        "TOP SECRET",
+      );
+    },
+  );
 
   it("should re-validate parent after mkdir in writeFile", async () => {
     // Create parent dir, then write should validate the full path again

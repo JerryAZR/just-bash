@@ -4,10 +4,22 @@
 
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../../Bash.js";
+import { isDnsReachable } from "../../../test-utils/net-env.js";
+
+/**
+ * The "allows" cases below pass the allow-list check and then perform a real
+ * fetch; in sandboxed/offline environments that fetch never returns, turning
+ * the test into a timeout failure that says nothing about the allow-list.
+ * Skip honestly when real DNS is unavailable.
+ */
+async function skipIfOffline(ctx: { skip: () => void }): Promise<void> {
+  if (!(await isDnsReachable())) ctx.skip();
+}
 
 describe("curl URL allow-list", () => {
   describe("basic enforcement", () => {
-    it("allows URLs in allow-list", async () => {
+    it("allows URLs in allow-list", async (ctx) => {
+      await skipIfOffline(ctx);
       const env = new Bash({
         network: { allowedUrlPrefixes: ["https://api.example.com"] },
       });
@@ -27,7 +39,8 @@ describe("curl URL allow-list", () => {
   });
 
   describe("path prefix restrictions", () => {
-    it("allows URLs matching prefix", async () => {
+    it("allows URLs matching prefix", async (ctx) => {
+      await skipIfOffline(ctx);
       const env = new Bash({
         network: { allowedUrlPrefixes: ["https://api.example.com/v1/"] },
       });
@@ -45,7 +58,8 @@ describe("curl URL allow-list", () => {
   });
 
   describe("multiple allowed URLs", () => {
-    it("allows any matching URL", async () => {
+    it("allows any matching URL", async (ctx) => {
+      await skipIfOffline(ctx);
       const env = new Bash({
         network: {
           allowedUrlPrefixes: [

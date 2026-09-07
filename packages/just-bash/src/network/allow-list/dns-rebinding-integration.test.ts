@@ -8,6 +8,7 @@
 
 import { lookup } from "node:dns";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { isDnsReachable } from "../../test-utils/net-env.js";
 import {
   createBashEnvAdapter,
   createMockFetch,
@@ -52,16 +53,13 @@ describe("DNS rebinding integration (real DNS)", () => {
     expect(hasLoopback).toBe(true);
   });
 
-  it("allows public domain through real DNS check (if DNS available)", async () => {
-    // Try to resolve a real public domain. May fail in sandboxed
-    // environments — skip gracefully if so.
-    let addresses: { address: string; family: number }[];
-    try {
-      addresses = await realLookupAll("example.com");
-    } catch {
-      // DNS unavailable (sandbox/CI) — skip
-      return;
-    }
+  it("allows public domain through real DNS check (if DNS available)", async (ctx) => {
+    // Try to resolve a real public domain. May be unavailable in sandboxed
+    // environments — skip honestly if so. A black-holed resolver would
+    // otherwise hang the lookup until the test times out, so probe with a
+    // bound first.
+    if (!(await isDnsReachable())) ctx.skip();
+    const addresses = await realLookupAll("example.com");
 
     expect(addresses.length).toBeGreaterThan(0);
     // example.com should resolve to a public IP
@@ -109,14 +107,11 @@ describe("DNS rebinding integration (real DNS)", () => {
     expect(mockFetch.mock.calls).toHaveLength(callsBefore);
   });
 
-  it("denyPrivateRanges + allow-list works with real DNS", async () => {
+  it("denyPrivateRanges + allow-list works with real DNS", async (ctx) => {
     // Verify the combination of allow-list + denyPrivateRanges + real DNS
-    // doesn't break normal operation for a public domain.
-    try {
-      await realLookupAll("example.com");
-    } catch {
-      return;
-    }
+    // doesn't break normal operation for a public domain. Skip honestly
+    // when real DNS is unavailable (see above for the bounded probe).
+    if (!(await isDnsReachable())) ctx.skip();
 
     const env = createBashEnvAdapter({
       network: {

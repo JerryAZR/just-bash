@@ -54,21 +54,25 @@ describe("MountableFs host-planted hard-link containment", () => {
     expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
   });
 
-  it("delegates metadata copy-on-write to the real filesystem", async () => {
-    const originalAtime = new Date("2020-04-01T00:00:00.000Z");
-    const originalMtimeDate = new Date("2020-04-02T00:00:00.000Z");
-    fs.utimesSync(outsideFile, originalAtime, originalMtimeDate);
-    const originalMode = fs.statSync(outsideFile).mode & 0o777;
-    const originalMtime = fs.statSync(outsideFile).mtimeMs;
-    const changed = new Date("2020-04-03T00:00:00.000Z");
+  // Copy-on-write containment stages the replacement while holding the source open, then rename()s over it; win32 cannot rename over an open file (EPERM), so this mechanism is POSIX-only.
+  it.skipIf(process.platform === "win32")(
+    "delegates metadata copy-on-write to the real filesystem",
+    async () => {
+      const originalAtime = new Date("2020-04-01T00:00:00.000Z");
+      const originalMtimeDate = new Date("2020-04-02T00:00:00.000Z");
+      fs.utimesSync(outsideFile, originalAtime, originalMtimeDate);
+      const originalMode = fs.statSync(outsideFile).mode & 0o777;
+      const originalMtime = fs.statSync(outsideFile).mtimeMs;
+      const changed = new Date("2020-04-03T00:00:00.000Z");
 
-    await mounted.chmod("/workspace/linked.txt", 0o700);
-    await mounted.utimes("/workspace/linked.txt", changed, changed);
+      await mounted.chmod("/workspace/linked.txt", 0o700);
+      await mounted.utimes("/workspace/linked.txt", changed, changed);
 
-    expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
-    expect(fs.statSync(outsideFile).mode & 0o777).toBe(originalMode);
-    expect(fs.statSync(outsideFile).mtimeMs).toBe(originalMtime);
-    expect(fs.statSync(linkedFile).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(linkedFile).mtimeMs).toBe(changed.getTime());
-  });
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside");
+      expect(fs.statSync(outsideFile).mode & 0o777).toBe(originalMode);
+      expect(fs.statSync(outsideFile).mtimeMs).toBe(originalMtime);
+      expect(fs.statSync(linkedFile).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(linkedFile).mtimeMs).toBe(changed.getTime());
+    },
+  );
 });
