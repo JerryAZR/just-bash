@@ -142,9 +142,10 @@ export const ERRNO_TO_WIRE: Record<string, ErrorCodeType> = Object.assign(
   },
 );
 
-const WIRE_TO_ERRNO: Record<number, string> = Object.create(
-  null,
-) as Record<number, string>;
+const WIRE_TO_ERRNO: Record<number, string> = Object.create(null) as Record<
+  number,
+  string
+>;
 for (const [name, code] of Object.entries(ERRNO_TO_WIRE)) {
   WIRE_TO_ERRNO[code] = name;
 }
