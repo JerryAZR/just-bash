@@ -65,13 +65,17 @@ export interface VfsTemplate {
    * Replay the given sources' change sets onto a fresh fork and return
    * it. Sources may be fork instances (diffed in vfs space) or plain
    * diffs (e.g. serialized across a process boundary). Array order is
-   * the tie-break for equal changedAt stamps.
+   * the tie-break for equal changedAt stamps. Entries outside every
+   * mount point replay into the shared scratch (ordinary fork
+   * semantics, never reported in diff()) — merge expects diffs in
+   * this template's vfs space.
    */
   merge(sources: Array<MountableFs | OverlayDiff>): Promise<MountableFs>;
   /**
    * Validate a merged host-space diff against the mount map (every
-   * entry inside a registered root, symlink containment) and apply it
-   * to the real filesystem.
+   * entry inside a registered root, no symlink writes, no root-self
+   * deletion) and apply it to the real filesystem. Type-conflicting
+   * on-disk targets are replaced (the change-set supersedes the base).
    */
   apply(merged: OverlayDiff): void;
 }

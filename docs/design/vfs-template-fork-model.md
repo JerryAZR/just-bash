@@ -159,12 +159,15 @@ The contract this produces (the promised behavior, pinned by
 2. **Deletion semantics**: a deletion removes the subtree as of its
    stamp; strictly-later content resurrects as ordinary creation
    (the tree's `resurrectDir`, emitting per-child whiteouts for stale
-   lower content with the deleting fork's stamp).
+   lower content that carry **the deletion's own stamp, minted with
+   it at birth** — never a wall-clock time).
 3. **Structural invariants on output**: no children under
    files/symlinks; no nested deletions.
 4. **metadataOnly**: on an existing node it updates mode/mtime in
    place; on a lower file it becomes a metacopy shadow (apply resolves
-   it); on a deleted/missing path it is skipped (ENOENT).
+   it); on a deleted/missing path it is skipped (ENOENT). A
+   content-free metadataOnly entry (neither mode nor mtime) applies
+   nothing and asserts no stamp.
 5. **Disjoint unions merge cleanly**, any number of sources.
 6. **Determinism**: identical input produces byte-identical output.
 7. **Completion**: never throws, never hangs, on adversarial input.
@@ -177,7 +180,21 @@ over another fork's directory is EISDIR — skipped, anomaly contained
 to that path, and the structural invariants hold trivially. We do not
 invent conflict-resolution rules real filesystems don't have; racy
 input is the user's fault, and the merge owes determinism and
-containment, not arbitration. (An earlier iteration implemented
+containment, not arbitration. Two corollaries of stock-op replay:
+a type collision at equal (`path`, `stamp`) is won by the FIRST
+replayed entry (the second is refused EISDIR/EEXIST — "latest
+*accepted* wins"), and symlink write entries are always refused
+(template overlays are default-deny, so template diffs never
+contain them; foreign ones EPERM-skip like any refusal).
+
+**Out-of-mount entries** (foreign plain diffs only — a fork's vfs
+diff can only contain mount-relative paths): merge expects diffs in
+this template's vfs space. An entry outside every mount point is
+replayed like any path and lands in the template's **shared
+scratch** — exactly as if a fork had touched that path directly
+(shared-fate by design, and never reported in `diff()`, which
+covers mounts only). The caller owns their input; the behavior is
+the fork model's own, not a merge rule. (An earlier iteration implemented
 last-touch-wins type replacement, scaffolding-vs-whiteout rules, and
 whiteout subtree suppression by hand on flat path lists — it grew a
 critical sibling-key bug (`/x/a-b` sorts between `/x/a` and `/x/a/b`)
@@ -185,11 +202,14 @@ and was replaced by this replay, which gets the same outcomes from
 the stock operations' own semantics.)
 
 **Stamps**: after each replayed operation, the touched node's
-`changedAt` is set to the replayed entry's own stamp (ancestors and
-resurrection whiteouts minted by the op take it too). The sort is the
-single source of ordering truth — wall clocks never leak into merged
-output, and the stamps stay in the inputs' space so merged diffs can
-be merged again.
+`changedAt` is set to the replayed entry's own stamp (ancestors
+minted by the op take it via the newer-stamp rule; resurrection
+whiteouts carry the deletion's stamp from birth). A **refused** op
+restamps ancestors only — its scaffolding gets the entry's stamp
+(deterministic), but it owns no stamp on a node it did not create.
+The sort is the single source of ordering truth — wall clocks never
+leak into merged output, and the stamps stay in the inputs' space
+so merged diffs can be merged again.
 
 ## Apply semantics
 
@@ -198,6 +218,25 @@ be merged again.
   loudly) and applies via the existing `apply.ts` primitives
   (canonicalize, write, mkdir, metadataOnly chmod+utimes, deletions via
   remove). No overlay instance is involved.
+- **Symlink write entries are rejected** at validation: template
+  flows can never produce them (default-deny everywhere), and a
+  same-diff symlink would redirect later entries past the batch
+  containment check. So is deleting a registered root itself.
+- **Type conflicts are replaced**: a change-set that writes a file
+  where the base has a directory (e.g. `rm -rf d` + write file `d` —
+  the whiteout is absorbed into the write) replaces the on-disk
+  target; applying a change-set means making the base match it, not
+  dying mid-apply with EISDIR after earlier entries already landed.
+  A `metadataOnly` entry over a diverged type has no content lineage
+  and fails loudly instead.
+- **Ensured-parent directory entries** (dirs the overlay created on
+  demand to host a write, reported as ordinary directory writes)
+  carry default mode and the op's stamp: applying the diff rewrites
+  those on-disk directories' mode/mtime. This is inherited from the
+  overlay diff representation (the same is true of upstream
+  `applyDiffToRealFs` on any raw fork diff), not a merge rule —
+  callers who need exact base preservation should compare/sync
+  first.
 - **Standalone `applyDiffToRealFs(diff)`** is the same engine without a
   template: absolute paths are caller-trusted input; per-entry
   canonicalization still blocks symlink escapes. Documented as: only

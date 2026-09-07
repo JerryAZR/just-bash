@@ -338,6 +338,31 @@ describe("template merge contract", () => {
     expect(JSON.stringify(await run())).toBe(JSON.stringify(merged));
   });
 
+  it("symlink write entries are refused by the stock op and skipped, contained", async () => {
+    // Template overlays are default-deny (allowSymlinks: false), so a
+    // foreign vfs diff's symlink entry EPERMs at replay: skipped like
+    // any refusal, and it never reaches the output.
+    const merged = vfsDiff(
+      await tpl.merge([
+        {
+          writes: [
+            {
+              path: "/project/link",
+              nodeType: "symlink" as const,
+              content: new TextEncoder().encode("/outside"),
+              mode: 0o777,
+              mtime: new Date(0),
+              changedAt: 1,
+            },
+            file("/project/f", 2),
+          ],
+          deletions: [],
+        },
+      ]),
+    );
+    expect(merged.writes.map((w) => w.path)).toEqual(["/project/f"]);
+  });
+
   it("byte-identical output for identical input", async () => {
     const sources = (): OverlayDiff[] => [
       {
@@ -377,9 +402,6 @@ describe("template merge contract", () => {
     fs.writeFileSync(path.join(projectRoot, "p", "keep"), "original");
     const b = tpl.fork();
     await b.writeFile("/project/p/keep", "modified-by-b");
-    const bStamp = (await b.diff({ space: "vfs" })).writes.find(
-      (w) => w.path === "/project/p/keep",
-    )?.changedAt;
     await new Promise((r) => setTimeout(r, 5));
     const a = tpl.fork();
     await a.rm("/project/p", { recursive: true });
