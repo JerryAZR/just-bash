@@ -251,20 +251,22 @@ export class OverlayFs implements IFileSystem {
     }
     // Descendants: resurrection whiteouts minted by a mkdir-over-
     // whiteout belong to the replayed entry. Skipped in "ancestors"
-    // scope: a failed op changed nothing below its path.
+    // scope: a failed op changed nothing below its path. Iterative
+    // (house rule: no recursive tree walks).
     if (scope === "ancestors") return;
-    const walk = (p: string): void => {
+    const stack: string[] = [normalized];
+    while (stack.length > 0) {
+      const p = stack.pop() as string;
       const r = this.tree.descend(p);
-      if (r.kind !== "found" || r.node.type !== "directory") return;
+      if (r.kind !== "found" || r.node.type !== "directory") continue;
       for (const name of (
         r.node as { children: Map<string, unknown> }
       ).children.keys()) {
         const childPath = `${p === "/" ? "" : p}/${name}`;
         soften(childPath);
-        walk(childPath);
+        stack.push(childPath);
       }
-    };
-    walk(normalized);
+    }
   }
 
   private identityFor(entry: OverlayEntryNode): string {
