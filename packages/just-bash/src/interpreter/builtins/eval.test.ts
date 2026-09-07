@@ -158,4 +158,37 @@ describe("eval builtin", () => {
       expect(result.stdout).toContain("hello");
     });
   });
+
+  describe("POSIX special-builtin dispatch (manifest posixEarly)", () => {
+    // eval dispatches ahead of function lookup only in POSIX mode —
+    // the truth lives in the manifest's posixEarly flag; dropping it
+    // must fail these, not silently regress.
+    it("function eval overrides the builtin in default mode", async () => {
+      const env = new Bash();
+      const result = await env.exec(
+        'eval() { echo shadowed; }\neval "echo builtin"',
+      );
+      expect(result.stdout).toBe("shadowed\n");
+    });
+
+    it("a pre-existing function eval is bypassed under set -o posix", async () => {
+      const env = new Bash();
+      const result = await env.exec(
+        'eval() { echo shadowed; }\nset -o posix\neval "echo builtin"',
+      );
+      expect(result.stdout).toBe("builtin\n");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("defining a function named eval fails under set -o posix", async () => {
+      // Real bash: `eval': is a special builtin, exit 2.
+      const env = new Bash();
+      const result = await env.exec(
+        'set -o posix\neval() { echo shadowed; }\neval "echo builtin"',
+      );
+      expect(result.stderr).toContain("`eval': is a special builtin");
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout).toBe("");
+    });
+  });
 });

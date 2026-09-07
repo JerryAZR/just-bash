@@ -21,6 +21,7 @@ export {
 } from "./path-utils.js";
 
 import { FsError } from "./fs-error.js";
+import { toVirtualSlashes } from "./path-utils.js";
 
 /**
  * Check whether `resolved` is equal to, or a child of, `canonicalRoot`.
@@ -230,7 +231,7 @@ export function sanitizeSymlinkTarget(
 
   if (isPathWithinRoot(resolved, canonicalRoot)) {
     const relativePath =
-      resolved.slice(canonicalRoot.length).replace(/\\/g, "/") || "/";
+      toVirtualSlashes(resolved.slice(canonicalRoot.length)) || "/";
     return { withinRoot: true, relativePath };
   }
 

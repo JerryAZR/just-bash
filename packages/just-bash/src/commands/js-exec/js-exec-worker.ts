@@ -1392,11 +1392,14 @@ async function executeCode(
             }
             return source;
           } catch (e) {
-            return {
-              error: new Error(
-                `Cannot find module '${moduleName}': ${(e as Error).message}`,
-              ),
-            };
+            const err = new Error(
+              `Cannot find module '${moduleName}': ${(e as Error).message}`,
+            );
+            const code = (e as { code?: string }).code;
+            if (code !== undefined) {
+              (err as { code?: string }).code = code;
+            }
+            return { error: err };
           }
         },
         (baseModuleName: string, requestedName: string) => {

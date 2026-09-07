@@ -54,16 +54,16 @@ const CPYTHON_ENTRY_BASENAME = "/vendor/cpython-emscripten/python.cjs";
 const CPYTHON_STDLIB_BASENAME = "/vendor/cpython-emscripten/python313.zip";
 let moduleLoadGuardInstalled = false;
 
-function normalizePath(path: string): string {
+function normalizeSeparators(path: string): string {
   return path.replace(/\\/g, "/");
 }
 
 function isApprovedCpythonEntryPath(path: string): boolean {
-  return normalizePath(path).endsWith(CPYTHON_ENTRY_BASENAME);
+  return normalizeSeparators(path).endsWith(CPYTHON_ENTRY_BASENAME);
 }
 
 function isApprovedStdlibZipPath(path: string): boolean {
-  return normalizePath(path).endsWith(CPYTHON_STDLIB_BASENAME);
+  return normalizeSeparators(path).endsWith(CPYTHON_STDLIB_BASENAME);
 }
 
 function assertApprovedPath(

@@ -1687,7 +1687,7 @@ export class ReadWriteFs implements IFileSystem {
             ? virtualTarget.slice(1) || "."
             : virtualTarget;
         }
-        return nodePath.relative(linkDir, virtualTarget);
+        return toVirtualSlashes(nodePath.relative(linkDir, virtualTarget));
       }
 
       // Outside root - the symlink target points outside the sandbox.

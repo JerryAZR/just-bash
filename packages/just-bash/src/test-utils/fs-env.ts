@@ -25,17 +25,21 @@ let symlinkSupport: boolean | undefined;
  */
 export function canCreateSymlinks(): boolean {
   if (symlinkSupport === undefined) {
-    const dir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "just-bash-symlink-probe-"),
-    );
     try {
-      fs.symlinkSync(path.join(dir, "target.txt"), path.join(dir, "link"));
-      symlinkSupport = true;
+      const dir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "just-bash-symlink-probe-"),
+      );
+      try {
+        fs.symlinkSync(path.join(dir, "target.txt"), path.join(dir, "link"));
+        symlinkSupport = true;
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     } catch {
-      // EPERM on unprivileged win32; EACCES/EROFS on locked-down hosts.
+      // EPERM on unprivileged win32; EACCES/EROFS on locked-down hosts;
+      // ENOENT/EACCES from a broken TMPDIR. Any probe failure is an
+      // honest "no", never a collection-time crash.
       symlinkSupport = false;
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
     }
   }
   return symlinkSupport;
