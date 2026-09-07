@@ -110,6 +110,30 @@ deliberate Windows behavior (metacopy promotion, mode rules, mount
 scanning, the sandbox flow). Releases are changeset-driven and publish
 via npm Trusted Publisher when changesets are queued.
 
+### Platform notes and limitations
+
+These are deliberate, documented platform behaviors — not test failures.
+Tests that depend on a missing host capability are gated with capability
+probes (`src/test-utils/fs-env.ts`) or `skipIf(platform)` and pass where
+the capability exists; none of them document limitations *by failing*.
+
+- **Symlinks (win32)**: creating real symlinks requires elevation or
+  Developer Mode. Symlink-dependent tests probe `canCreateSymlinks()`
+  and skip on unprivileged hosts; the sandbox's default-deny symlink
+  policy is itself host-independent and always enforced.
+- **Copy-on-write rename (POSIX only)**: the hard-link containment
+  strategy stages via rename-over-open-file, which win32 forbids.
+  Those tests skip on win32; a win32-compatible variant is a design
+  decision, tracked as such rather than as failing tests.
+- **Mode bits (win32)**: POSIX permission bits are advisory only (they
+  map at most to the read-only attribute). Exact-mode assertions are
+  POSIX-gated; win32-meaningful assertions run everywhere.
+- **Native codecs**: tar's xz/zstd paths need optional native modules
+  with no win32 prebuilds; those tests probe and skip.
+- **Spec-test conformance**: each imported suite keeps an explicit skip
+  ledger with per-entry reasons (`src/spec-tests/*/skips.ts`); the
+  runner fails on unexpected passes so the ledger cannot rot.
+
 ## Upstream
 
 This fork tracks [vercel-labs/just-bash](https://github.com/vercel-labs/just-bash)
