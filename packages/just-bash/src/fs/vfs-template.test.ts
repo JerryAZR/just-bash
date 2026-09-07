@@ -200,6 +200,40 @@ describe("mount validation", () => {
       }),
     ).toThrow(/duplicate mount point/);
   });
+
+  it("rejects a root mount point at construction", () => {
+    expect(() =>
+      createVfsTemplate({ mounts: [{ at: "/", root: "/tmp" }] }),
+    ).toThrow(/mount point/);
+  });
+
+  it("rejects nested mount points at construction", () => {
+    expect(() =>
+      createVfsTemplate({
+        mounts: [
+          { at: "/a", root: "/tmp" },
+          { at: "/a/b", root: "/tmp" },
+        ],
+      }),
+    ).toThrow(/mount point/);
+  });
+
+  it("rejects nested host roots at construction", () => {
+    const r1 = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-r1-"));
+    fs.mkdirSync(path.join(r1, "sub"));
+    try {
+      expect(() =>
+        createVfsTemplate({
+          mounts: [
+            { at: "/a", root: r1 },
+            { at: "/b", root: path.join(r1, "sub") },
+          ],
+        }),
+      ).toThrow(/nested template roots/);
+    } finally {
+      fs.rmSync(r1, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
 });
 
 describe("symlink containment at apply", () => {

@@ -94,6 +94,38 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
       );
     }
     seenAts.add(at);
+    if (at === "/") {
+      throw new FsError(
+        "EINVAL",
+        "mount point '/' would swallow the shared scratch space",
+      );
+    }
+    for (const other of seenAts) {
+      if (other !== at && at.startsWith(`${other}/`)) {
+        throw new FsError(
+          "EINVAL",
+          `mount point '${at}' is nested inside '${other}'`,
+        );
+      }
+    }
+  }
+  // Nested host roots put two overlays over one real subtree: each
+  // shadows it independently and the forks see divergent state.
+  const seenRoots: string[] = [];
+  for (const { root } of mounts) {
+    for (const other of seenRoots) {
+      const sep = nodePath.sep;
+      if (
+        root !== other &&
+        (root.startsWith(other + sep) || other.startsWith(root + sep))
+      ) {
+        throw new FsError(
+          "EINVAL",
+          `nested template roots share one real subtree: '${root}' and '${other}'`,
+        );
+      }
+    }
+    seenRoots.push(root);
   }
 
   const scratch = new InMemoryFs();
