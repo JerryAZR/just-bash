@@ -32,7 +32,7 @@ import type {
   RmOptions,
   WriteFileOptions,
 } from "../interface.js";
-import { resolvePath as resolveVPath } from "../path-utils.js";
+import { resolvePath as resolveVPath, toVirtualSlashes } from "../path-utils.js";
 import {
   isPathWithinRoot,
   normalizePath,
@@ -1106,7 +1106,9 @@ export class ReadWriteFs implements IFileSystem {
         `permission denied, cp '${virtualSource}' contains an unsafe symlink`,
       );
     }
-    const relative = preservedTarget.slice(this.canonicalRoot.length);
+    const relative = toVirtualSlashes(
+      preservedTarget.slice(this.canonicalRoot.length),
+    );
     return relative || "/";
   }
 
@@ -1674,7 +1676,9 @@ export class ReadWriteFs implements IFileSystem {
       if (isPathWithinRoot(canonicalTarget, this.canonicalRoot)) {
         // Within root - compute virtual target path and return as relative
         const virtualTarget =
-          canonicalTarget.slice(this.canonicalRoot.length) || "/";
+          toVirtualSlashes(
+            canonicalTarget.slice(this.canonicalRoot.length),
+          ) || "/";
         // Return as relative path from the link's virtual directory
         if (linkDir === "/") {
           return virtualTarget.startsWith("/")
@@ -1753,7 +1757,9 @@ export class ReadWriteFs implements IFileSystem {
     // with resolveAndValidate. Use boundary-safe prefix check to prevent
     // /data matching /datastore.
     if (isPathWithinRoot(resolved, this.canonicalRoot)) {
-      const relative = resolved.slice(this.canonicalRoot.length);
+      const relative = toVirtualSlashes(
+        resolved.slice(this.canonicalRoot.length),
+      );
       return relative || "/";
     }
     // Resolved path is outside root - reject it to prevent sandbox escape

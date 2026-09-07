@@ -102,6 +102,14 @@ export function resolvePath(base: string, path: string): string {
  * Join a parent path with a child name.
  * Handles the root-path edge case (`"/" + "child"` → `"/child"`).
  */
+/** Convert an OS-form path fragment to VFS slash form (win32
+ * backslashes become slashes; on POSIX this is a no-op). VFS paths are
+ * always slash-form — use when reconstructing a virtual path from a
+ * real-OS path (e.g. slicing off a real root). */
+export function toVirtualSlashes(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
 export function joinPath(parent: string, child: string): string {
   return parent === "/" ? `/${child}` : `${parent}/${child}`;
 }
