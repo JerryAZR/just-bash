@@ -195,6 +195,38 @@ describe("template merge contract", () => {
     expect(merged.deletions).toEqual(["/project/f"]);
   });
 
+  it("older diff with MORE ops cannot overwrite a newer diff's colliding write", async () => {
+    // The replay must be SEQUENTIAL: if forks ran concurrently on the
+    // shared cumulative overlay, the older diff's extra ops would let
+    // its write land LAST at the colliding path — wrong content under
+    // a wrong stamp. Ordering is structural, not scheduling luck.
+    const merged = await tpl.merge([
+      {
+        writes: [
+          dir("/project/a", 10),
+          dir("/project/b", 10),
+          dir("/project/c", 10),
+          file("/project/f", 10, {
+            content: new TextEncoder().encode("old"),
+          }),
+        ],
+        deletions: [],
+      },
+      {
+        writes: [
+          file("/project/f", 20, {
+            content: new TextEncoder().encode("new"),
+          }),
+        ],
+        deletions: [],
+      },
+    ]);
+    expect(await merged.readFile("/project/f", "utf8")).toBe("new");
+    expect(
+      vfsDiff(merged).writes.find((w) => w.path === "/project/f")?.changedAt,
+    ).toBe(20);
+  });
+
   it("byte-identical output for identical input", async () => {
     const sources = (): OverlayDiff[] => [
       {
