@@ -142,12 +142,12 @@ export const ERRNO_TO_WIRE: Record<string, ErrorCodeType> = Object.assign(
   },
 );
 
-const WIRE_TO_ERRNO: Record<number, string> = Object.assign(
-  Object.create(null) as Record<number, string>,
-  Object.fromEntries(
-    Object.entries(ERRNO_TO_WIRE).map(([name, code]) => [code, name]),
-  ),
-);
+const WIRE_TO_ERRNO: Record<number, string> = Object.create(
+  null,
+) as Record<number, string>;
+for (const [name, code] of Object.entries(ERRNO_TO_WIRE)) {
+  WIRE_TO_ERRNO[code] = name;
+}
 
 /** Errno name for a wire code, or undefined for non-errno wire codes
  * (NONE, IO_ERROR, network conditions). PERMISSION_DENIED inverts to

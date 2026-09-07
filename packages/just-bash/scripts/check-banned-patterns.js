@@ -817,6 +817,7 @@ const SKIP_PATH_PATTERNS = [
 // Files/patterns to skip entirely
 const SKIP_PATTERNS = [
   /\.test\.ts$/, // Test files are generally safe (hardcoded test data)
+  /src\/test-utils\//, // Shared test infrastructure (same class as test files)
   /\.comparison\.test\.ts$/,
   /spec-tests/,
   /prototype-pollution\.test/, // These test the protection
