@@ -190,6 +190,18 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
         deletionChangedAt: merged.deletionChangedAt,
       }),
     };
+    for (const write of normalized.writes) {
+      if (write.nodeType === "symlink") {
+        // Symlink writes are impossible from the supported flow (forks
+        // and merge both refuse symlink creation), and a same-diff
+        // symlink would redirect LATER entries past the containment
+        // check below. Fail loudly.
+        throw new FsError(
+          "EINVAL",
+          `change-set contains a symlink write: '${write.path}'`,
+        );
+      }
+    }
     for (const target of [
       ...normalized.deletions,
       ...normalized.writes.map((w) => w.path),
@@ -202,6 +214,15 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
           "EINVAL",
           `change-set entry outside every template root: '${target}'`,
         );
+      }
+      if (normalized.deletions.includes(target)) {
+        const isRoot = mounts.some(({ root }) => target === root);
+        if (isRoot) {
+          throw new FsError(
+            "EINVAL",
+            `change-set deletes a registered root: '${target}'`,
+          );
+        }
       }
       // Symlink containment: the canonical location of the entry (its
       // deepest existing ancestor, realpath'd, plus the remainder) must

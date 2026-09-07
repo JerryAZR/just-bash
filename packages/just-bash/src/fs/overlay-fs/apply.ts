@@ -24,17 +24,48 @@ export function removeFromRealFs(path: string): void {
 }
 
 /**
+ * Does `path` exist on disk with a type other than the one the
+ * change-set wants? Symlinks count as their own type: lstat never
+ * follows them, so a symlink where a file/dir is wanted (or vice
+ * versa) is a conflict.
+ */
+function typeConflict_(path: string, wantDirectory: boolean): boolean {
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(path);
+  } catch {
+    return false; // ENOENT: nothing to conflict with
+  }
+  return wantDirectory ? !st.isDirectory() : st.isDirectory();
+}
+
+/**
+ * A change-set REPLACES whatever was at the path: a fork that did
+ * `rm -rf d && write file d` produces a diff carrying only the write
+ * (the whiteout is absorbed), and applying it to a base that still has
+ * the directory must remove the directory first — not die mid-apply
+ * with EISDIR after earlier entries already landed.
+ */
+function replaceTypeConflict_(path: string, wantDirectory: boolean): void {
+  if (typeConflict_(path, wantDirectory)) {
+    fs.rmSync(path, { recursive: true, force: true });
+  }
+}
+
+/**
  * Apply one change-set write to a real path. Directories are mkdir -p;
  * symlinks are recreated with the recorded target; files get the recorded
  * content (unless metadataOnly — a chmod/utimes copy-up), the recorded
  * mode (POSIX only — mode bits are advisory on Windows), and the recorded
- * mtime restored after the content write.
+ * mtime restored after the content write. A type-conflicting on-disk
+ * target is replaced (the change-set supersedes the base).
  */
 export function applyWriteToRealFs(
   path: string,
   write: Omit<OverlayWrite, "path">,
 ): void {
   if (write.nodeType === "directory") {
+    replaceTypeConflict_(path, true);
     fs.mkdirSync(path, { recursive: true });
     // Directories carry mode/mtime too (a chmod 700 dir in the sandbox
     // must not vanish at apply). Mode bits are advisory on Windows.
@@ -46,11 +77,20 @@ export function applyWriteToRealFs(
   }
   fs.mkdirSync(nodePath.dirname(path), { recursive: true });
   if (write.nodeType === "symlink") {
-    fs.rmSync(path, { force: true });
+    fs.rmSync(path, { force: true, recursive: true });
     fs.symlinkSync(new TextDecoder().decode(write.content), path);
     return;
   }
+  if (write.metadataOnly && typeConflict_(path, false)) {
+    // No content to materialize and the on-disk type diverged from the
+    // copy-up lineage — conflicting input, fail loudly.
+    throw new FsError(
+      "EINVAL",
+      `metadata-only entry over a different on-disk type: '${path}'`,
+    );
+  }
   if (!write.metadataOnly) {
+    replaceTypeConflict_(path, false);
     fs.writeFileSync(path, write.content);
   }
   // Mode bits are advisory on Windows; apply them on POSIX only.

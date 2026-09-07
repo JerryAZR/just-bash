@@ -119,6 +119,65 @@ describe("createVfsTemplate", () => {
     ).toThrow(/outside every template root/);
   });
 
+  it("apply rejects symlink write entries (impossible from the flow)", () => {
+    // Forks and merge both refuse symlink creation (default-deny), so
+    // no template-produced diff can contain one — and a same-diff
+    // symlink would redirect LATER entries past the containment check.
+    // Fail loudly at validation.
+    const tpl = makeTemplate();
+    expect(() =>
+      tpl.apply({
+        writes: [
+          {
+            path: path.join(projectRoot, "link"),
+            nodeType: "symlink" as const,
+            content: new TextEncoder().encode("/outside"),
+            mode: 0o777,
+            mtime: new Date(0),
+          },
+        ],
+        deletions: [],
+      }),
+    ).toThrow(/symlink write/);
+  });
+
+  it("apply rejects deleting a registered root itself", () => {
+    const tpl = makeTemplate();
+    expect(() =>
+      tpl.apply({
+        writes: [],
+        deletions: [projectRoot],
+      }),
+    ).toThrow(/deletes a registered root/);
+  });
+
+  it("apply replaces an on-disk directory when the change-set writes a file over it", async () => {
+    // rm -rf /project/d && write file /project/d produces a diff with
+    // only the write (the whiteout is absorbed); applying that change
+    // -set to a base that still has the directory means REPLACE it —
+    // not die mid-apply with EISDIR after earlier entries landed.
+    const tpl = makeTemplate();
+    fs.mkdirSync(path.join(projectRoot, "d"));
+    fs.writeFileSync(path.join(projectRoot, "d", "inner"), "x");
+    const fork = tpl.fork();
+    await fork.rm("/project/d", { recursive: true });
+    await fork.writeFile("/project/d", "now-a-file");
+    tpl.apply(await fork.diff({ space: "host" }));
+    expect(fs.readFileSync(path.join(projectRoot, "d"), "utf8")).toBe(
+      "now-a-file",
+    );
+  });
+
+  it("apply replaces an on-disk file when the change-set mkdirs over it", async () => {
+    const tpl = makeTemplate();
+    fs.writeFileSync(path.join(projectRoot, "f"), "x");
+    const fork = tpl.fork();
+    await fork.rm("/project/f");
+    await fork.mkdir("/project/f");
+    tpl.apply(await fork.diff({ space: "host" }));
+    expect(fs.statSync(path.join(projectRoot, "f")).isDirectory()).toBe(true);
+  });
+
   function file(path: string, content: string) {
     return {
       path,
