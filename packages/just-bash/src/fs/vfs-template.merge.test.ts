@@ -227,6 +227,28 @@ describe("template merge contract", () => {
     ).toBe(20);
   });
 
+  it("resurrection whiteouts carry the deleting entry's stamp, never wall clock", async () => {
+    // Lower has /project/p/keep; deleting /project/p then writing under
+    // it resurrects the dir and mints a whiteout for keep. That whiteout
+    // competes in merges against other forks' writes AS the deletion —
+    // its stamp must be the deletion's, not Date.now().
+    fs.mkdirSync(path.join(projectRoot, "p"));
+    fs.writeFileSync(path.join(projectRoot, "p", "keep"), "k");
+    const merged = vfsDiff(
+      await tpl.merge([
+        { writes: [], deletions: ["/project/p"], deletionChangedAt: [1] },
+        { writes: [file("/project/p/f", 2)], deletions: [] },
+      ]),
+    );
+    const idx = merged.deletions.indexOf("/project/p/keep");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(merged.deletionChangedAt?.[idx]).toBe(1);
+    // Every output stamp comes from the input stamp space.
+    for (const w of merged.writes) {
+      expect([1, 2]).toContain(w.changedAt);
+    }
+  });
+
   it("byte-identical output for identical input", async () => {
     const sources = (): OverlayDiff[] => [
       {
@@ -273,15 +295,19 @@ describe("template merge contract", () => {
     const a = tpl.fork();
     await a.rm("/project/p", { recursive: true });
     await a.mkdir("/project/p");
+    const aDiff = await a.diff({ space: "vfs" });
+    const aStamp =
+      aDiff.deletionChangedAt?.[aDiff.deletions.indexOf("/project/p/keep")];
 
     const merged = vfsDiff(await tpl.merge([b, a]));
     // A deleted /p/keep after B wrote it: the resurrection whiteout
     // suppresses B's write; the resurrected /p dir survives.
     expect(merged.deletions).toEqual(["/project/p/keep"]);
     expect(merged.writes.map((w) => w.path)).toEqual(["/project/p"]);
-    // The whiteout carries A's time (later than B's write), so it wins.
-    expect(bStamp).toBeDefined();
-    expect(merged.deletionChangedAt?.[0]).toBeGreaterThan(bStamp as number);
+    // The whiteout carries A's deletion stamp exactly — never a
+    // wall-clock time from the replay.
+    expect(aStamp).toBeDefined();
+    expect(merged.deletionChangedAt?.[0]).toBe(aStamp);
   });
 
   it("explicit mkdir after a whiteout resurrects", async () => {

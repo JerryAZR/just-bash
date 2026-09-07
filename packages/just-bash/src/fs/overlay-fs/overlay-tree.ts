@@ -250,7 +250,13 @@ export class OverlayTree {
         child = freshDirNode();
         current.children.set(segment, child);
       } else if (child.type === "whiteout") {
-        child = this.resurrectDir(current, segment, currentPath, lowerChildren);
+        child = this.resurrectDir(
+          current,
+          segment,
+          currentPath,
+          child.changedAt ?? 0,
+          lowerChildren,
+        );
       } else if (child.type !== "directory") {
         throw new FsError("ENOTDIR", `not a directory, mkdir '${path}'`);
       }
@@ -268,6 +274,7 @@ export class OverlayTree {
     parent: OverlayDirNode,
     name: string,
     vfsPath: string,
+    deletedAt: number,
     lowerChildren?: (vfsPath: string) => Iterable<string> | null,
   ): OverlayDirNode {
     const dir = freshDirNode();
@@ -276,11 +283,13 @@ export class OverlayTree {
     if (lower) {
       for (const childName of lower) {
         if (!dir.children.has(childName)) {
-          // Resurrection whiteouts carry the deletion's time: they
-          // compete in merges against writes from other forks.
+          // Resurrection whiteouts carry the deletion's stamp: they
+          // compete in merges against writes from other forks AS the
+          // deletion, and must never take a wall-clock time (merged
+          // output is a pure function of the input diffs).
           dir.children.set(childName, {
             type: "whiteout",
-            changedAt: dir.changedAt,
+            changedAt: deletedAt,
           });
         }
       }
