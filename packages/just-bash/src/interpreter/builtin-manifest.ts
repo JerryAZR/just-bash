@@ -24,7 +24,13 @@
  * an optional `phase?` would let a phaseless handler compile and fall
  * silently through to external resolution (exit 127). */
 export type BuiltinManifestEntry =
-  | { kind: "handler"; phase: "early" | "late" }
+  | {
+      kind: "handler";
+      phase: "early" | "late";
+      /** Bash special case: dispatch EARLY in POSIX mode even though
+       * functions may override in normal mode (eval). */
+      posixEarly?: boolean;
+    }
   | { kind: "registry" }
   | { kind: "unimplemented" };
 
@@ -63,9 +69,9 @@ const manifest = {
   readonly: { kind: "handler", phase: "early" },
 
   // Late handlers: functions may override these. `eval` is the special
-  // case bash makes special: in POSIX mode it dispatches early (see
-  // dispatchBuiltin).
-  eval: { kind: "handler", phase: "late" },
+  // case bash makes special: in POSIX mode it dispatches early
+  // (posixEarly).
+  eval: { kind: "handler", phase: "late", posixEarly: true },
   cd: { kind: "handler", phase: "late" },
   ":": { kind: "handler", phase: "late" },
   true: { kind: "handler", phase: "late" },
@@ -150,4 +156,13 @@ export function builtinPhase(name: string): "early" | "late" | undefined {
     ? manifestView[name]
     : undefined;
   return entry?.kind === "handler" ? entry.phase : undefined;
+}
+
+/** True when a handler dispatches early in POSIX mode despite a "late"
+ * phase (eval — the only such builtin). */
+export function builtinPosixEarly(name: string): boolean {
+  const entry = Object.hasOwn(manifestView, name)
+    ? manifestView[name]
+    : undefined;
+  return entry?.kind === "handler" && entry.posixEarly === true;
 }

@@ -25,6 +25,7 @@ import type {
 } from "../types.js";
 import {
   builtinPhase,
+  builtinPosixEarly,
   type ManifestHandlerName,
   SHELL_BUILTINS,
 } from "./builtin-manifest.js";
@@ -576,7 +577,8 @@ export async function dispatchBuiltin(
   // is bash's special case: it dispatches early only in POSIX mode.
   if (
     handler &&
-    (phase === "early" || (commandName === "eval" && ctx.state.options.posix))
+    (phase === "early" ||
+      (ctx.state.options.posix && builtinPosixEarly(commandName)))
   ) {
     return handler(dispatchCtx, args, io);
   }
