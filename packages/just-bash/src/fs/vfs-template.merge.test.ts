@@ -249,6 +249,95 @@ describe("template merge contract", () => {
     }
   });
 
+  it("a content-free metadataOnly entry applies nothing and asserts no stamp", async () => {
+    const merged = vfsDiff(
+      await tpl.merge([
+        { writes: [file("/project/f", 1)], deletions: [] },
+        {
+          writes: [
+            {
+              path: "/project/f",
+              nodeType: "file" as const,
+              content: new Uint8Array(0),
+              mode: undefined as unknown as number,
+              mtime: undefined as unknown as Date,
+              metadataOnly: true,
+              changedAt: 9,
+            },
+          ],
+          deletions: [],
+        },
+      ]),
+    );
+    // The no-op entry must not move /project/f's stamp to 9.
+    expect(merged.writes.find((w) => w.path === "/project/f")?.changedAt).toBe(
+      1,
+    );
+  });
+
+  it("an explicit dir entry's metadata lands over an ensured parent", async () => {
+    // A child write replaying first ensures /project/d with default
+    // mode; the explicit dir entry (later stamp) must still apply its
+    // metadata (mkdir -p semantics), not die EEXIST.
+    const merged = vfsDiff(
+      await tpl.merge([
+        { writes: [file("/project/d/f", 1)], deletions: [] },
+        {
+          writes: [
+            {
+              path: "/project/d",
+              nodeType: "directory" as const,
+              content: new Uint8Array(0),
+              mode: 0o700,
+              mtime: new Date(0),
+              changedAt: 2,
+            },
+          ],
+          deletions: [],
+        },
+      ]),
+    );
+    const d = merged.writes.find((w) => w.path === "/project/d");
+    expect(d?.mode).toBe(0o700);
+    expect(d?.changedAt).toBe(2);
+  });
+
+  it("a write refused after minting parents leaves deterministic stamps", async () => {
+    // ENOSPC after ensureParentDirs: the parents were minted (they
+    // appear in the output) and must carry the failed op's stamp —
+    // never wall clock. The failed file itself is absent.
+    const tight = createVfsTemplate({
+      mounts: [{ at: "/project", root: projectRoot }],
+      maxMemoryBytes: 64,
+    });
+    const source = {
+      writes: [
+        {
+          path: "/project/a/b/big",
+          nodeType: "file" as const,
+          content: new Uint8Array(1024),
+          mode: 0o644,
+          mtime: new Date(0),
+          changedAt: 7,
+        },
+      ],
+      deletions: [],
+    };
+    const run = async () => vfsDiff(await tight.merge([source]));
+    const merged = await run();
+    expect(
+      merged.writes.find((w) => w.path === "/project/a/b/big"),
+    ).toBeUndefined();
+    expect(merged.writes.map((w) => w.path).sort()).toEqual([
+      "/project/a",
+      "/project/a/b",
+    ]);
+    for (const w of merged.writes) {
+      expect(w.changedAt).toBe(7);
+    }
+    expect(JSON.stringify(await run())).toBe(JSON.stringify(merged));
+  });
+
   it("byte-identical output for identical input", async () => {
     const sources = (): OverlayDiff[] => [
       {

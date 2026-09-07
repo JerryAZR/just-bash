@@ -21,6 +21,12 @@ export interface VfsTemplateOptions {
    * visible to every fork immediately and never appear in diffs.
    */
   mounts: VfsTemplateMount[];
+  /**
+   * Per-overlay content-byte budget (OverlayFs maxMemoryBytes),
+   * bounding each fork's copy-up memory. Default: the OverlayFs
+   * default.
+   */
+  maxMemoryBytes?: number;
 }
 
 /**
@@ -95,7 +101,16 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
   const makeVfs = (): MountableFs => {
     const vfs = new MountableFs({ base: scratch });
     for (const { at, root } of mounts) {
-      vfs.mount(at, new OverlayFsImpl({ root, mountPoint: "/" }));
+      vfs.mount(
+        at,
+        new OverlayFsImpl({
+          root,
+          mountPoint: "/",
+          ...(options.maxMemoryBytes !== undefined && {
+            maxMemoryBytes: options.maxMemoryBytes,
+          }),
+        }),
+      );
     }
     return vfs;
   };
@@ -136,6 +151,17 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
 
     const target = makeVfs();
     for (const entry of entries) {
+      if (
+        entry.kind === "write" &&
+        entry.write.metadataOnly &&
+        entry.write.mode === undefined &&
+        entry.write.mtime === undefined
+      ) {
+        // A content-free metadataOnly entry applies nothing; it must
+        // not assert its stamp on the node either.
+        continue;
+      }
+      let applied = false;
       try {
         if (entry.kind === "delete") {
           await target.rm(entry.path, { recursive: true });
@@ -147,7 +173,11 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
               await target.utimes(w.path, w.mtime, w.mtime);
             }
           } else if (w.nodeType === "directory") {
-            await target.mkdir(w.path);
+            // mkdir -p: an ensured parent may already exist when a
+            // child's write replayed first — the explicit dir entry's
+            // metadata must still land (stock idempotent form, not a
+            // merge rule).
+            await target.mkdir(w.path, { recursive: true });
             if (w.mode !== undefined) await target.chmod(w.path, w.mode);
             if (w.mtime !== undefined) {
               await target.utimes(w.path, w.mtime, w.mtime);
@@ -163,14 +193,29 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
             }
           }
         }
+        applied = true;
+      } catch {
+        // The filesystem refused (ENOTDIR under a file, ENOENT on a
+        // missing chmod/rm target, EISDIR on a type collision, EPERM
+        // on symlink): conflicting input, refusal contained to this
+        // path — skip.
+      }
+      if (applied) {
         target.restamp(
           entry.kind === "delete" ? entry.path : entry.write.path,
           entry.changedAt,
         );
-      } catch {
-        // The filesystem refused (ENOTDIR under a file, ENOENT on a
-        // missing chmod/rm target, EEXIST on mkdir, EPERM on symlink):
-        // conflicting input, refusal contained to this path — skip.
+      } else {
+        // A refused op may still have minted parent dirs before
+        // failing (e.g. ENOSPC after ensureParentDirs): soften the
+        // ancestor chain so no wall-clock stamp reaches the output.
+        // The op path itself is untouched — the failed op owns no
+        // stamp on a node it did not create.
+        target.restamp(
+          entry.kind === "delete" ? entry.path : entry.write.path,
+          entry.changedAt,
+          "ancestors",
+        );
       }
     }
     return target;

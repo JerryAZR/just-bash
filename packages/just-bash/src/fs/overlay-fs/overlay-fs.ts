@@ -210,7 +210,11 @@ export class OverlayFs implements IFileSystem {
    * are never touched. This is a host-side reconciliation API, not a
    * guest operation: changedAt is the ordering key merges rely on.
    */
-  restamp(path: string, changedAt: number): void {
+  restamp(
+    path: string,
+    changedAt: number,
+    scope: "full" | "ancestors" = "full",
+  ): void {
     const normalized = normalizePath(path);
     const stamp = (p: string): void => {
       const r = this.tree.descend(p);
@@ -234,8 +238,9 @@ export class OverlayFs implements IFileSystem {
       }
     };
     // The op's own node takes the entry stamp unconditionally (a chmod
-    // bumps the stamp; a fresh attach carries it).
-    stamp(normalized);
+    // bumps the stamp; a fresh attach carries it). Skipped in
+    // "ancestors" scope: a FAILED op owns no stamp on the node.
+    if (scope === "full") stamp(normalized);
     // Ancestors: only fresh (newer) stamps belong to this op.
     let current = normalized;
     for (;;) {
@@ -245,7 +250,9 @@ export class OverlayFs implements IFileSystem {
       soften(current);
     }
     // Descendants: resurrection whiteouts minted by a mkdir-over-
-    // whiteout belong to the replayed entry.
+    // whiteout belong to the replayed entry. Skipped in "ancestors"
+    // scope: a failed op changed nothing below its path.
+    if (scope === "ancestors") return;
     const walk = (p: string): void => {
       const r = this.tree.descend(p);
       if (r.kind !== "found" || r.node.type !== "directory") return;

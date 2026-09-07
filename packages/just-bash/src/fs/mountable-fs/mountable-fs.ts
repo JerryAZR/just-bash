@@ -189,12 +189,19 @@ export class MountableFs implements IFileSystem {
    * the owning mount. Paths outside every mount (shared scratch) have
    * no stampable overlay and are ignored.
    */
-  restamp(path: string, changedAt: number): void {
+  restamp(
+    path: string,
+    changedAt: number,
+    scope: "full" | "ancestors" = "full",
+  ): void {
     const { fs, relativePath } = this.routePath(path);
-    const restamp = (fs as { restamp?: (p: string, t: number) => void })
-      .restamp;
+    const restamp = (
+      fs as {
+        restamp?: (p: string, t: number, s?: "full" | "ancestors") => void;
+      }
+    ).restamp;
     if (typeof restamp === "function") {
-      restamp.call(fs, relativePath, changedAt);
+      restamp.call(fs, relativePath, changedAt, scope);
     }
   }
 
