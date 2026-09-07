@@ -10,6 +10,7 @@ import { rethrowFatalExecutionError } from "../../fatal-execution-error.js";
 import { Parser } from "../../parser/parser.js";
 import { ExitError } from "../errors.js";
 import { cloneArrays } from "../helpers/array.js";
+import { recordSubstitutionExit } from "../helpers/substitution-status.js";
 import type { InterpreterContext } from "../types.js";
 import { escapeGlobChars } from "./glob-escape.js";
 
@@ -133,8 +134,7 @@ async function executeCommandSubstitutionFromString(
     ctx.state.arrays = savedArrays;
     ctx.state.cwd = savedCwd;
     ctx.state.suppressVerbose = savedSuppressVerbose;
-    ctx.state.lastExitCode = exitCode;
-    ctx.state.env.set("?", String(exitCode));
+    recordSubstitutionExit(ctx.state, exitCode);
     if (result.stderr) {
       ctx.state.expansionStderr =
         (ctx.state.expansionStderr || "") + result.stderr;
@@ -152,8 +152,7 @@ async function executeCommandSubstitutionFromString(
     // substitution.
     rethrowFatalExecutionError(error);
     if (error instanceof ExitError) {
-      ctx.state.lastExitCode = error.exitCode;
-      ctx.state.env.set("?", String(error.exitCode));
+      recordSubstitutionExit(ctx.state, error.exitCode);
       return error.stdout?.replace(/\n+$/, "") ?? "";
     }
     return "";
