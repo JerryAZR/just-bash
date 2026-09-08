@@ -1,5 +1,5 @@
 ---
-"just-bash": minor
+"@jerryan/just-bash": minor
 ---
 
 `diff` now defaults to POSIX normal format (`2c2` / `<` / `---` / `>`) instead of unified, matching GNU diffutils and POSIX. **This changes the default output and will break anything parsing the previous unified-by-default output** — pass `-u` to keep unified.

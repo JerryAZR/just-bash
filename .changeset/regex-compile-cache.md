@@ -1,5 +1,5 @@
 ---
-"just-bash": patch
+"@jerryan/just-bash": patch
 ---
 
 regex: cache compiled RE2 patterns across `UserRegex` constructions
