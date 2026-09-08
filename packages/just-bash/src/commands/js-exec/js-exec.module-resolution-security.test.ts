@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { expectExecResult } from "../../test-utils/exec-result.js";
 
 describe("js-exec module resolution security", () => {
   it("should reject prototype-chain keys in require()", async () => {
@@ -16,16 +17,16 @@ for (const name of names) {
 }
 "`);
 
-    expect(result.stdout).toBe(
-      [
+    expectExecResult(result, {
+      stdout: [
         "__proto__:Cannot find module '__proto__'. Run 'js-exec --help' for available modules.",
         "constructor:Cannot find module 'constructor'. Run 'js-exec --help' for available modules.",
         "toString:Cannot find module 'toString'. Run 'js-exec --help' for available modules.",
         "",
       ].join("\n"),
-    );
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
+      stderr: "",
+      exitCode: 0,
+    });
   });
 
   it("should reject prototype-chain keys in import()", async () => {
@@ -44,10 +45,12 @@ for (const name of names) {
 }
 "`);
 
-    expect(result.stdout).toBe(
-      ["__proto__:true", "constructor:true", "toString:true", ""].join("\n"),
-    );
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
+    expectExecResult(result, {
+      stdout: ["__proto__:true", "constructor:true", "toString:true", ""].join(
+        "\n",
+      ),
+      stderr: "",
+      exitCode: 0,
+    });
   });
 });
