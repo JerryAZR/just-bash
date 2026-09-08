@@ -1,5 +1,13 @@
 # executor-tools-example
 
+## 1.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`ff8837a`](https://github.com/JerryAZR/just-bash/commit/ff8837ab0ed617c14ec70a2d7d383384e9c0ff5b)]:
+  - @jerryan/just-bash@3.7.0
+  - @just-bash/executor@7.0.0
+
 ## 1.0.13
 
 ### Patch Changes
