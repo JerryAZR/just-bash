@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 import { Bash } from "../../Bash.js";
 import { expectExecResult } from "../../test-utils/exec-result.js";
 
