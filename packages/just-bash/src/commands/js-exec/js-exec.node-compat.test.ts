@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { expectExecResult } from "../../test-utils/exec-result.js";
 
 describe("js-exec Node.js compatibility", () => {
   describe("node: prefix imports", () => {
@@ -241,8 +242,9 @@ describe("js-exec Node.js compatibility", () => {
       const result = await env.exec(
         `js-exec -c "try { fs.readFileSync('/missing.txt') } catch (e) { console.log(typeof e.code, e.code) }"`,
       );
-      expect(result.stdout).toBe("string ENOENT\n");
-      expect(result.exitCode).toBe(0);
+      // Full-result assertion: this test flaked once on CI (empty
+      // stdout, no other evidence) — never hide stderr/exitCode again.
+      expectExecResult(result, { stdout: "string ENOENT\n", exitCode: 0 });
     });
 
     it("should support copyFile", async () => {
@@ -250,8 +252,7 @@ describe("js-exec Node.js compatibility", () => {
       const result = await env.exec(
         `js-exec -c "fs.writeFileSync('/tmp/src.txt', 'copied'); fs.copyFileSync('/tmp/src.txt', '/tmp/dst.txt'); console.log(fs.readFileSync('/tmp/dst.txt')); console.log(fs.existsSync('/tmp/src.txt'))"`,
       );
-      expect(result.stdout).toBe("copied\ntrue\n");
-      expect(result.exitCode).toBe(0);
+      expectExecResult(result, { stdout: "copied\ntrue\n", exitCode: 0 });
     });
   });
 

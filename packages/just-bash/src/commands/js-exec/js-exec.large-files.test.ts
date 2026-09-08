@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../../Bash.js";
+import { expectExecResult } from "../../test-utils/exec-result.js";
 
 // Same 8MB bridge-buffer ceiling as python: files larger than the
 // transport buffer are read/written in chunks, transparently. Payloads
@@ -25,9 +26,11 @@ for (var i = 0; i < s.length; i++) { if (s[i] !== String.fromCharCode(65 + (i % 
 console.log(s.length, ok);
 "`,
     );
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`${NINE_MB} true\n`);
-    expect(result.exitCode).toBe(0);
+    expectExecResult(result, {
+      stdout: `${NINE_MB} true\n`,
+      stderr: "",
+      exitCode: 0,
+    });
   }, 30_000);
 
   it("writes and reads back a 9MB file with exact bytes", async () => {
@@ -46,9 +49,11 @@ if (ok && back[back.length - 1] !== 'E') ok = false;
 console.log(back.length, ok);
 "`,
     );
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`${NINE_MB + 1} true\n`);
-    expect(result.exitCode).toBe(0);
+    expectExecResult(result, {
+      stdout: `${NINE_MB + 1} true\n`,
+      stderr: "",
+      exitCode: 0,
+    });
   }, 30_000);
 });
 
@@ -58,7 +63,7 @@ describe("write data type strictness", () => {
     const result = await env.exec(
       `js-exec -c "var fs = require('fs'); try { fs.writeFileSync('/x', {a: 1}); console.log('NO ERROR'); } catch(e) { console.log('threw'); }"`,
     );
-    expect(result.stdout).toBe("threw\n");
+    expectExecResult(result, { stdout: "threw\n" });
     const cat = await env.exec("cat /x");
     expect(cat.exitCode).toBe(1);
   }, 30_000);
