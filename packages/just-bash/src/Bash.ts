@@ -113,11 +113,13 @@ export interface JavaScriptConfig {
   /**
    * Tool invocation hook. When provided, code running in `js-exec` gets a
    * global `tools` proxy that routes calls through this callback synchronously
-   * (the worker blocks via `Atomics.wait` while the host resolves the call).
+   * while `run` dispatches the host binding.
    *
    * - `path`: dot-separated tool path (e.g. `"math.add"`). The proxy builds
    *   it from JS property access — `tools.math.add(...)` becomes `"math.add"`.
    * - `argsJson`: JSON-stringified args object, or empty string for no args.
+   * - `abortSignal`: aborts when js-exec is canceled or times out. Tool
+   *   implementations should forward it to cancelable work.
    * - return: JSON-stringified result, or empty string for `undefined`.
    * - throw: propagates as a catchable exception inside the sandbox.
    *
@@ -127,7 +129,11 @@ export interface JavaScriptConfig {
    * `@just-bash/executor` produces a matching `invokeTool` + `commands` pair
    * from inline tools and/or `@executor-js/sdk` discovery.
    */
-  invokeTool?: (path: string, argsJson: string) => Promise<string>;
+  invokeTool?: (
+    path: string,
+    argsJson: string,
+    abortSignal: AbortSignal,
+  ) => Promise<string>;
 }
 
 export interface BashOptions {
@@ -337,7 +343,11 @@ export class Bash {
   private coverageWriter?: FeatureCoverageWriter;
   private jsBootstrapCode?: string;
   private abortOnUnresolvedCommands = false;
-  private invokeToolFn?: (path: string, argsJson: string) => Promise<string>;
+  private invokeToolFn?: (
+    path: string,
+    argsJson: string,
+    abortSignal: AbortSignal,
+  ) => Promise<string>;
   // biome-ignore lint/suspicious/noExplicitAny: type-erased plugin storage for untyped API
   private transformPlugins: TransformPlugin<any>[] = [];
 
