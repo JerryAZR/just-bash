@@ -44,7 +44,10 @@ console.log(s.length, ok);
     // run's sync bridge stalls on cumulative guest→host payloads above
     // ~6MB. The guest writes in 2MB chunks (each under the limit), then
     // reads back the full file (read path has no cumulative limit).
-    const env = new Bash({ javascript: true, executionLimits: { maxJsTimeoutMs: 120_000 } });
+    const env = new Bash({
+      javascript: true,
+      executionLimits: { maxJsTimeoutMs: 120_000 },
+    });
     const result = await env.exec(
       `js-exec -c "
 var fs = require('fs');
@@ -79,7 +82,10 @@ console.log(back.length, ok);
 
 describe("write data type strictness", () => {
   it("rejects plain objects loudly instead of writing coerced text", async () => {
-    const env = new Bash({ javascript: true, executionLimits: { maxJsTimeoutMs: 120_000 } });
+    const env = new Bash({
+      javascript: true,
+      executionLimits: { maxJsTimeoutMs: 120_000 },
+    });
     const result = await env.exec(
       `js-exec -c "var fs = require('fs'); try { fs.writeFileSync('/x', {a: 1}); console.log('NO ERROR'); } catch(e) { console.log('threw'); }"`,
     );
