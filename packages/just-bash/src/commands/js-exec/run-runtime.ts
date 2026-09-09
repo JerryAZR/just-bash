@@ -602,7 +602,7 @@ const guestSetupSource = (
   })(names[i]);
   fs.promises.unlink = fs.promises.rm;
   fs.promises.rmdir = fs.promises.rm;
-  fs.promises.access = function(path) { return fs.existsSync(path) ? Promise.resolve() : Promise.reject(new Error('ENOENT: no such file or directory: ' + path)); };
+  fs.promises.access = function(path) { return fs.existsSync(path) ? Promise.resolve() : Promise.reject(Object.assign(new Error('no such file or directory: ' + path), {code: 'ENOENT'})); };
   globalThis.fs = fs;
 
   ${PATH_MODULE_SOURCE}
