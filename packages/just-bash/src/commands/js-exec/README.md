@@ -256,5 +256,7 @@ and/or `@executor-js/sdk` discovery (GraphQL, OpenAPI, MCP).
 
 - **Memory**: 64 MB per execution
 - **Timeout**: 30 seconds normally and 10 seconds in the hardened profile; never raised by enabling network access (configurable via `maxJsTimeoutMs`, including time spent waiting for another `js-exec` invocation; `Infinity` maps to about 24.9 days)
-- **Host bridge operations**: 8 MiB per-call payload ceiling, bounded by `maxJsBridgeRequests` (100,000 in the hardened profile and 1,000,000 otherwise)
+- **Host bridge operations**: bounded by `maxJsBridgeRequests` (100,000 in the hardened profile and 1,000,000 otherwise)
+- **File reads**: up to ~24 MB per file (latin1 transport over the 32 MB bridge)
+- **File writes**: up to ~6 MB cumulative per execution. The run sync bridge records each call's arguments in a continuation ledger; writes above ~6 MB total stall. Reads have no cumulative limit. For larger writes, write from the shell side (not js-exec) or use multiple exec calls.
 - **Engine**: QuickJS (compiled to WebAssembly)

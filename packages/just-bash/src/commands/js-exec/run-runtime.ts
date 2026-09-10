@@ -74,12 +74,11 @@ interface QueuedExecution {
 
 const executionQueue: QueuedExecution[] = [];
 let executionActive = false;
-// 256MB: the run bridge transports binary as base64 (33% wire
-// inflation, 2x in QuickJS's UTF-16 heap), so oversized reads need
-// more headroom than the old raw-bytes SAB bridge did.
+// 256MB QuickJS heap: latin1 transport has no wire inflation, but
+// the guest still needs headroom for large strings + Buffer overhead.
 const RUN_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
-// The run sync bridge SAB caps at 64MB. We use 32MB to fit base64
-// payloads for files up to ~24MB raw (9MB test files need 12MB base64).
+// The run sync bridge SAB caps at 64MB. We use 32MB to fit latin1
+// payloads for files up to ~24MB raw (9MB test files need 9MB latin1).
 const RUN_SYNC_BRIDGE_PAYLOAD_BYTES = 32 * 1024 * 1024;
 const RUN_MAX_LIMIT_VALUE = 2_147_483_647;
 const RUN_BRIDGE_VALUE_OVERHEAD_BYTES = 4096;
