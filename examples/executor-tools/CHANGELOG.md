@@ -1,5 +1,13 @@
 # executor-tools-example
 
+## 1.0.15
+
+### Patch Changes
+
+- Updated dependencies [[`fa769ce`](https://github.com/JerryAZR/just-bash/commit/fa769ce277a6f1e137e5751082d7a84ab5e0badc), [`30e7df8`](https://github.com/JerryAZR/just-bash/commit/30e7df8689f93409d50702df49f9dc5da1484d1c), [`e6ae113`](https://github.com/JerryAZR/just-bash/commit/e6ae113b4dccbf7877028257511b19a52b0ddc78), [`689d409`](https://github.com/JerryAZR/just-bash/commit/689d409f3de2cee192cac6afbe13df89328f6eb4), [`68f6984`](https://github.com/JerryAZR/just-bash/commit/68f69840ef018f7a0df0964b086b8d2403ad8abe), [`04dad0d`](https://github.com/JerryAZR/just-bash/commit/04dad0dcbdb90622587eb1273080286a2a4cd4b7), [`3820a66`](https://github.com/JerryAZR/just-bash/commit/3820a660b692c9e9638d8c88cb713b43691cdc02)]:
+  - @jerryan/just-bash@3.8.0
+  - @just-bash/executor@8.0.0
+
 ## 1.0.14
 
 ### Patch Changes
