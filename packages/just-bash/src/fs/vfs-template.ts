@@ -27,6 +27,12 @@ export interface VfsTemplateOptions {
    * default.
    */
   maxMemoryBytes?: number;
+  /**
+   * When true, overlay mounts are read-only: writes through the
+   * overlay fail with EROFS. Forks can read the host filesystem
+   * but cannot modify it. Default: false.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -142,6 +148,9 @@ export function createVfsTemplate(options: VfsTemplateOptions): VfsTemplate {
         new OverlayFsImpl({
           root,
           mountPoint: "/",
+          ...(options.readOnly !== undefined && {
+            readOnly: options.readOnly,
+          }),
           ...(options.maxMemoryBytes !== undefined && {
             maxMemoryBytes: options.maxMemoryBytes,
           }),

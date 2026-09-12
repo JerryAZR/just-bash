@@ -269,3 +269,26 @@ describe("symlink containment at apply", () => {
     },
   );
 });
+
+describe("readOnly option", () => {
+  it("fork mounts are read-only when readOnly: true", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "tpl-ro-"));
+    fs.writeFileSync(path.join(root, "app.ts"), "v0\n");
+    try {
+      const tpl = createVfsTemplate({
+        mounts: [{ at: "/project", root }],
+        readOnly: true,
+      });
+      const fork = tpl.fork();
+      // Reads work
+      const content = await fork.readFile("/project/app.ts", "utf8");
+      expect(content).toBe("v0\n");
+      // Writes fail
+      await expect(fork.writeFile("/project/new.ts", "x")).rejects.toThrow();
+      await expect(fork.mkdir("/project/dir")).rejects.toThrow();
+      await expect(fork.rm("/project/app.ts")).rejects.toThrow();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});
