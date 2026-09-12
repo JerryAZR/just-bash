@@ -1501,6 +1501,7 @@ async function executeCode(
     const moduleCompletion = input.isModule
       ? context.resolvePromise(result.value)
       : undefined;
+    // @banned-pattern-ignore: internal loop cap, not a user-facing resource limit
     const MAX_DRAIN_ITERATIONS = 10_000;
     let pendingResult = runtime.executePendingJobs();
     let drainIterations = 1;
