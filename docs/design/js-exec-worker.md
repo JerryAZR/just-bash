@@ -32,3 +32,22 @@ hundreds of attempts on Windows and under simulated CPU load). The fix is
 structurally more correct but may not address the root cause if the issue
 is elsewhere (e.g. in the sync bridge's Atomics interaction or the QuickJS
 WASM build's asyncify mechanism).
+
+## Update: output loss is broader than microtasks
+
+After the `executePendingJobs` loop fix, a DIFFERENT test in the same file
+failed on CI: `blocks nested js-exec when backgrounded without wait`. The
+missing output was the main script's final `console.log` (not a microtask).
+The loop doesn't address this case.
+
+The common thread across all observed failures: **the guest's final
+`console.log` output is lost when the execution completes.** This suggests
+the race is in the sync bridge's write-stdout path or the worker's
+result-delivery path, not in QuickJS's job queue. The writes are synchronous
+from the guest's perspective (Atomics.wait), but the host's processing is
+async (event loop). If the host reads the output buffer before the final
+write is appended, the output is truncated.
+
+Current status: tests pass after the loop fix + rerun, but the root cause
+is not confirmed. The loop may have changed timing enough to avoid the
+race, or the race is truly non-deterministic.
