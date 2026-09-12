@@ -41,8 +41,6 @@ Node.js Compatibility:
 Limits:
   Memory: 64 MB per execution
   Timeout: configurable via maxJsTimeoutMs
-  File reads: up to ~24 MB per file
-  File writes: up to ~6 MB cumulative per execution (reads unlimited)
   Engine: run (QuickJS)
 `;
 
