@@ -10,7 +10,7 @@ import {
   RunTimeoutError,
 } from "run";
 import { combineAbortSignals } from "../../abort-signals.js";
-import { FsError, fsErrorCode } from "../../fs/fs-error.js";
+import { fsErrorCode } from "../../fs/fs-error.js";
 import {
   sanitizeErrorMessage,
   sanitizeHostErrorMessage,
@@ -482,9 +482,10 @@ const guestSetupSource = (
   // Write in small chunks WITHOUT holding the full latin1 string in
   // scope — run's continuation serializes live bindings per sync host
   // call, so a large string in scope would stall every chunk's bridge.
-  // Write in bridge-sized chunks. run's sync bridge stalls on
-  // cumulative payload > ~6MB, so keep chunks small and let each
-  // one go out of scope before the next call.
+  // Chunked write: run's sync bridge serializes the stack frame per
+  // call (including args). Frames above ~6MB stall, so keep each
+  // call's payload under that. The guest builds latin1 chunks locally
+  // (no bridge traffic) and sends them one at a time.
   function writeChunked(path, data, append) {
     var arr;
     if (typeof data === 'string') arr = null;
@@ -494,7 +495,7 @@ const guestSetupSource = (
     else if (data instanceof Uint8Array) arr = data;
     else if (data instanceof Buffer) arr = data._data;
     else throw new TypeError('File data must be a string, Buffer, Uint8Array, or byte array');
-    var BRIDGE_CHUNK = 4194304; // 4MB per bridge call — largest size that clears the sync bridge without stalling
+    var BRIDGE_CHUNK = 4194304; // 4MB per bridge call — under the ~6MB frame limit
     var CC_CHUNK = 32768; // fromCharCode apply() arg limit
     var offset = 0;
     var first = !append;
@@ -811,7 +812,7 @@ async function executeWithRunInner(
   // chunks via fsWriteStage (small continuations), then fsWriteCommit
   // flushes to the target path. Avoids passing large data as host
   // function arguments (which ride the continuation and stall it).
-  const writeStaging = new Map<string, Uint8Array[]>();
+
   let bridgeLimitReported = false;
   const bridgeLimitMessage = `JavaScript runtime exceeded the ${ctx.limits.maxJsBridgeRequests} bridge request limit.`;
   const consumeBridgeRequest = (): boolean => {
@@ -987,33 +988,6 @@ async function executeWithRunInner(
               async () =>
                 await ctx.fs.writeFile(resolve(path), toFileData(data)),
             ),
-          fsWriteStage: (path: string, data: unknown) =>
-            attempt(async () => {
-              const resolved = resolve(path);
-              const existing = writeStaging.get(resolved) ?? [];
-              existing.push(toFileData(data) as Uint8Array);
-              writeStaging.set(resolved, existing);
-            }),
-          fsWriteCommit: (path: string) =>
-            attempt(async () => {
-              const resolved = resolve(path);
-              const chunks = writeStaging.get(resolved);
-              writeStaging.delete(resolved);
-              if (!chunks || chunks.length === 0) {
-                throw new FsError(
-                  "EINVAL",
-                  `fsWriteCommit without staged data: '${path}'`,
-                );
-              }
-              const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-              const assembled = new Uint8Array(total);
-              let offset = 0;
-              for (const chunk of chunks) {
-                assembled.set(chunk, offset);
-                offset += chunk.byteLength;
-              }
-              await ctx.fs.writeFile(resolved, assembled);
-            }),
           fsAppend: (path: string, data: unknown) =>
             attempt(
               async () =>
