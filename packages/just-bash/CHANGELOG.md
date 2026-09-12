@@ -1,5 +1,69 @@
 # just-bash
 
+## 3.8.0
+
+### Minor Changes
+
+- [`30e7df8`](https://github.com/JerryAZR/just-bash/commit/30e7df8689f93409d50702df49f9dc5da1484d1c) Thanks [@trieloff](https://github.com/trieloff)! - `diff` now defaults to POSIX normal format (`2c2` / `<` / `---` / `>`) instead of unified, matching GNU diffutils and POSIX. **This changes the default output and will break anything parsing the previous unified-by-default output** — pass `-u` to keep unified.
+
+  Previously `-u` was parsed and discarded, `createTwoFilesPatch` was the only output path, and every invocation was prefixed with jsdiff's 67-character `===...===` banner, which is not valid output in any GNU format. Normal format was unreachable by any flag, so `diff a b | grep '^<'` — the canonical "lines only in A" idiom — silently matched nothing and exited cleanly on files that differ.
+
+  - `-u` / `--unified` now selects unified format, and `--normal` selects the default explicitly.
+  - New `-c` / `--context` for context format (`*** ` / `--- ` / `***************` / `! `).
+  - New `--version`.
+  - The `===` banner is gone from every format. The `-u` / `-c` file headers carry no timestamp, so output is reproducible; GNU puts each file's mtime there.
+  - Filenames in `-u` / `-c` headers are quoted and escaped as GNU does, so a filename containing a newline can no longer forge header or `@@` lines in the emitted patch.
+  - Two output styles at once (for example `diff -u -c`) is now an error, as in GNU: `diff: conflicting output style options`, exit 2.
+  - `\ No newline at end of file` is reported in all three formats.
+
+  `-q`, `-s`, `-i`, `-` for stdin, and the exit codes are unchanged.
+
+  Hunk selection is unchanged: where several equally minimal edit scripts exist, just-bash may group ambiguous changes differently than GNU. The output is always a correct, equally minimal patch, but the `NcN` line numbers can differ on such inputs.
+
+### Patch Changes
+
+- [`fa769ce`](https://github.com/JerryAZR/just-bash/commit/fa769ce277a6f1e137e5751082d7a84ab5e0badc) Thanks [@trieloff](https://github.com/trieloff)! - interpreter: give a bare assignment exit status 0 instead of the previous command's
+
+  A command with no command word — `x=1`, `arr=(a b)`, `> file`, a `$empty` that expands to nothing — reported whatever `$?` already held rather than success. Bash gives such a command status 0 unless a command substitution ran while expanding it.
+
+  The leak is invisible until something reads `$?`, and an `else` branch is where it bites: the branch runs with `$?` set to 1 by the condition that just failed, so an `else` branch ending in an assignment made the whole `if` report failure. Under `set -e` that ended the script with no output and no diagnostic:
+
+  ```bash
+  set -e
+  if false; then :; else x=1; fi
+  echo done                          # never ran
+  ```
+
+  A command substitution still sets the status where bash says it does. It counts from an assigned value or a redirection word, assignments expanded first and the last substitution winning: `x=$(exit 7)` is 7, `> /dev/null$(exit 5)` is 5, and `x=$(exit 7) > /dev/null$(exit 5)` is 5. A redirection onto fd 0 discards it and reports 0, matching bash 5.x, which forks a child to perform such a command's redirections. Process substitution never contributes, and neither does a command substitution in `PS4` under `set -x`.
+
+- [`e6ae113`](https://github.com/JerryAZR/just-bash/commit/e6ae113b4dccbf7877028257511b19a52b0ddc78) Thanks [@mutewinter](https://github.com/mutewinter)! - Report gzip files from their header instead of inflating them. `file` no longer enters `file-type`'s nested gzip probe, which decompressed up to 16 MB of input to look for an inner tar and leaked an `AbortError` unhandled rejection after the command had already returned. Gzipped tar archives now read as `gzip compressed data` rather than `gzip archive data`, matching `file`.
+
+- [`689d409`](https://github.com/JerryAZR/just-bash/commit/689d409f3de2cee192cac6afbe13df89328f6eb4) Thanks [@taoche](https://github.com/taoche)! - Run lazy file providers in the defense-in-depth trusted scope during materialization. Host-supplied providers doing real async I/O (`setTimeout`, `fetch`, `process.env`) previously tripped the blocked-globals traps when a script first read the file mid-exec, surfacing as a `SecurityViolationError` (formerly a silent empty read / ENOENT). Fixes [#253](https://github.com/JerryAZR/just-bash/issues/253).
+
+- [`68f6984`](https://github.com/JerryAZR/just-bash/commit/68f69840ef018f7a0df0964b086b8d2403ad8abe) Thanks [@trieloff](https://github.com/trieloff)! - Bound `ls` directory entry collections before per-entry work. A filesystem backend returning a very large directory could previously drive `ls` into sorting, statting, classifying and formatting every entry before any limit applied, and piping to `head` did not help because pipeline producers are materialized before consumers run. Oversized listings now fail with exit code 126 (`array element limit exceeded` / `filesystem traversal entry limit exceeded`), the recursive descent no longer fans out across sibling directories, and every operand of a multi-directory listing is charged to the same budget.
+
+- [`04dad0d`](https://github.com/JerryAZR/just-bash/commit/04dad0dcbdb90622587eb1273080286a2a4cd4b7) Thanks [@taoche](https://github.com/taoche)! - regex: cache compiled RE2 patterns across `UserRegex` constructions
+
+  Every `createUserRegex()` call recompiled its pattern from source
+  (`translateRegExp` → parse → simplify → compile). Commands that build a
+  `UserRegex` inside a per-row loop therefore recompiled the same pattern once per
+  row: jq's `test`/`match`/`capture`/`scan`/`splits`/`sub`/`gsub`, awk's `~`/`!~`
+  and `sub`/`gsub`/`match`/`split`, and sed's `s///` (which compiled the same
+  pattern twice per line for the `g` and Nth-occurrence paths). Compiling costs
+  ~23µs against ~1.5µs to match with an already-compiled pattern, so compilation
+  dominated these workloads.
+
+  Compiled patterns are now memoized in a 256-entry cache keyed on the pattern and
+  the RE2 flags, mirroring the existing glob regex cache in `src/utils/glob.ts`.
+  Patterns longer than 1024 characters are compiled but not retained, bounding the
+  cache's retained pattern source at 256 KiB. Only the compiled pattern is shared — `lastIndex`, the reusable matcher, result
+  limits and the abort signal stay per-instance, so matching semantics are
+  unchanged. Over 100k rows: jq `test()` 8.96s → 4.26s, awk `~` 4.15s → 2.55s,
+  awk `gsub` 7.16s → 6.10s, sed `s///g` 10.46s → 8.29s. Commands that already
+  hoisted compilation out of their loop (grep, rg) are unaffected.
+
+- [`3820a66`](https://github.com/JerryAZR/just-bash/commit/3820a660b692c9e9638d8c88cb713b43691cdc02) Thanks [@JerryAZR](https://github.com/JerryAZR)! - Replace the custom js-exec QuickJS worker with run, using synchronous host bindings and native module loading while preserving filesystem, tools, process, fetch, output-limit, and cancellation behavior. Keep queue admission inside the JavaScript deadline, restore argv-only `spawnSync` execution, top-level-await module detection, optional tool exposure, and the historical 8 MiB per-call bridge ceiling. Make the aggregate bridge request ceiling configurable, bound filesystem and module reads before allocation, preserve module-loader and bootstrap diagnostics, and enforce source, generated guest configuration, and combined-output byte limits without allowing `process.exit()` to clear limit failures. Preserve binary `Buffer` filesystem writes and the `ArrayBuffer` filesystem contract, project command results before they cross into the guest, gate bootstrap-only host behavior to the bootstrap phase, parse guest stacks with bounded linear work, redact runtime stack paths, and forward cancellation through the companion executor into inline tool contexts and SDK Effect execution.
+
 ## 3.7.0
 
 ### Minor Changes
