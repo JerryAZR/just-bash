@@ -60,7 +60,13 @@ interface DiffStyle {
   reportSame: boolean;
   ignoreCase: boolean;
   newFile: boolean;
+  /** GNU echoes the given options in each recursive header, e.g. "diff -ru". */
+  headerPrefix: string;
 }
+
+/** Maximum recursion depth for directory comparison. */
+// @banned-pattern-ignore: internal recursion guard, not a user-facing limit
+const MAX_DIFF_DEPTH = 100;
 
 /** Compare two file contents, return formatted diff output and whether they differ. */
 function compareContents(
@@ -141,6 +147,47 @@ async function statOrNull(
   }
 }
 
+interface DirEntry {
+  name: string;
+  isFile: boolean;
+  isDirectory: boolean;
+  isSymbolicLink: boolean;
+}
+
+/** List directory entries, falling back to readdir+stat when needed. */
+async function listDir(
+  ctx: RuntimeCommandContext,
+  resolved: string,
+): Promise<DirEntry[]> {
+  if (ctx.fs.readdirWithFileTypes) {
+    return ctx.fs.readdirWithFileTypes(resolved);
+  }
+  // Fallback: readdir + stat each entry
+  const names = await ctx.fs.readdir(resolved);
+  const entries: DirEntry[] = [];
+  for (const name of names) {
+    try {
+      const st = await ctx.fs.stat(`${resolved}/${name}`);
+      entries.push({
+        name,
+        isFile: st.isFile,
+        isDirectory: st.isDirectory,
+        isSymbolicLink: st.isSymbolicLink ?? false,
+      });
+    } catch {
+      // Skip unreadable entries
+    }
+  }
+  return entries;
+}
+
+/** Human-readable type label for a DirentEntry. */
+function typeLabel(e: DirEntry): string {
+  if (e.isDirectory) return "directory";
+  if (e.isSymbolicLink) return "symbolic link";
+  return "regular file";
+}
+
 /**
  * Recursively compare two directory trees.
  * Returns accumulated output and whether any differences were found.
@@ -150,12 +197,19 @@ async function diffDirectories(
   dir2: string,
   ctx: RuntimeCommandContext,
   style: DiffStyle,
+  depth = 0,
 ): Promise<{ output: string; differs: boolean }> {
+  if (depth > MAX_DIFF_DEPTH) {
+    return {
+      output: `diff: maximum recursion depth exceeded (${MAX_DIFF_DEPTH})\n`,
+      differs: true,
+    };
+  }
   const resolved1 = ctx.fs.resolvePath(ctx.cwd, dir1);
   const resolved2 = ctx.fs.resolvePath(ctx.cwd, dir2);
 
-  const entries1 = (await ctx.fs.readdirWithFileTypes?.(resolved1)) ?? [];
-  const entries2 = (await ctx.fs.readdirWithFileTypes?.(resolved2)) ?? [];
+  const entries1 = await listDir(ctx, resolved1);
+  const entries2 = await listDir(ctx, resolved2);
 
   const names1 = new Set(entries1.map((e) => e.name));
   const names2 = new Set(entries2.map((e) => e.name));
@@ -176,7 +230,7 @@ async function diffDirectories(
     if (e1 && e2) {
       // In both trees
       if (e1.isDirectory && e2.isDirectory) {
-        const sub = await diffDirectories(path1, path2, ctx, style);
+        const sub = await diffDirectories(path1, path2, ctx, style, depth + 1);
         output += sub.output;
         differs = differs || sub.differs;
       } else if (e1.isFile && e2.isFile) {
@@ -185,7 +239,7 @@ async function diffDirectories(
           const c2 = await readVfsFile(ctx, path2);
           const result = compareContents(path1, path2, c1, c2, style);
           if (result.differs && !style.brief && result.output) {
-            output += `diff ${path1} ${path2}\n`;
+            output += `${style.headerPrefix} ${path1} ${path2}\n`;
           }
           output += result.output;
           differs = differs || result.differs;
@@ -194,47 +248,69 @@ async function diffDirectories(
           differs = true;
         }
       } else {
-        // Type mismatch
-        const t1 = e1.isDirectory ? "directory" : "regular file";
-        const t2 = e2.isDirectory ? "directory" : "regular file";
-        output += `File ${path1} is a ${t1} while file ${path2} is a ${t2}\n`;
+        // Type mismatch (includes symlinks vs files, symlinks vs dirs, etc.)
+        output += `File ${path1} is a ${typeLabel(e1)} while file ${path2} is a ${typeLabel(e2)}\n`;
         differs = true;
       }
     } else if (e1) {
       // Only in dir1
-      differs = true;
       if (style.newFile) {
         if (e1.isDirectory) {
-          const sub = await diffTreeVsEmpty(path1, path2, ctx, style, true);
+          const sub = await diffTreeVsEmpty(
+            path1,
+            path2,
+            ctx,
+            style,
+            true,
+            depth + 1,
+          );
           output += sub.output;
-        } else {
+          differs = differs || sub.differs;
+        } else if (e1.isFile) {
           const c1 = await readVfsFile(ctx, path1);
           const result = compareContents(path1, path2, c1, "", style);
-          if (!style.brief && result.output) {
-            output += `diff ${path1} ${path2}\n`;
+          if (result.differs && !style.brief && result.output) {
+            output += `${style.headerPrefix} ${path1} ${path2}\n`;
           }
           output += result.output;
+          differs = differs || result.differs;
+        } else {
+          output += `Only in ${dir1}: ${name}\n`;
+          differs = true;
         }
       } else {
         output += `Only in ${dir1}: ${name}\n`;
+        differs = true;
       }
     } else if (e2) {
       // Only in dir2
-      differs = true;
       if (style.newFile) {
         if (e2.isDirectory) {
-          const sub = await diffTreeVsEmpty(path1, path2, ctx, style, false);
+          const sub = await diffTreeVsEmpty(
+            path2,
+            path1,
+            ctx,
+            style,
+            false,
+            depth + 1,
+          );
           output += sub.output;
-        } else {
+          differs = differs || sub.differs;
+        } else if (e2.isFile) {
           const c2 = await readVfsFile(ctx, path2);
           const result = compareContents(path1, path2, "", c2, style);
-          if (!style.brief && result.output) {
-            output += `diff ${path1} ${path2}\n`;
+          if (result.differs && !style.brief && result.output) {
+            output += `${style.headerPrefix} ${path1} ${path2}\n`;
           }
           output += result.output;
+          differs = differs || result.differs;
+        } else {
+          output += `Only in ${dir2}: ${name}\n`;
+          differs = true;
         }
       } else {
         output += `Only in ${dir2}: ${name}\n`;
+        differs = true;
       }
     }
   }
@@ -252,30 +328,52 @@ async function diffTreeVsEmpty(
   ctx: RuntimeCommandContext,
   style: DiffStyle,
   treeIsFirst: boolean,
-): Promise<{ output: string }> {
+  depth = 0,
+): Promise<{ output: string; differs: boolean }> {
+  if (depth > MAX_DIFF_DEPTH) {
+    return {
+      output: `diff: maximum recursion depth exceeded (${MAX_DIFF_DEPTH})\n`,
+      differs: true,
+    };
+  }
   const resolved = ctx.fs.resolvePath(ctx.cwd, treePath);
-  const entries = (await ctx.fs.readdirWithFileTypes?.(resolved)) ?? [];
-  const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  const entries = await listDir(ctx, resolved);
+  const sorted = [...entries].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
 
   let output = "";
+  let differs = false;
   for (const entry of sorted) {
     const tp = `${treePath}/${entry.name}`;
     const ep = `${emptyPath}/${entry.name}`;
     if (entry.isDirectory) {
-      const sub = await diffTreeVsEmpty(tp, ep, ctx, style, treeIsFirst);
+      const sub = await diffTreeVsEmpty(
+        tp,
+        ep,
+        ctx,
+        style,
+        treeIsFirst,
+        depth + 1,
+      );
       output += sub.output;
+      differs = differs || sub.differs;
     } else if (entry.isFile) {
       const content = await readVfsFile(ctx, tp);
       const c1 = treeIsFirst ? content : "";
       const c2 = treeIsFirst ? "" : content;
-      const result = compareContents(tp, ep, c1, c2, style);
-      if (!style.brief && result.output) {
-        output += `diff ${tp} ${ep}\n`;
+      const label1 = treeIsFirst ? tp : ep;
+      const label2 = treeIsFirst ? ep : tp;
+      const result = compareContents(label1, label2, c1, c2, style);
+      if (result.differs && !style.brief && result.output) {
+        output += `${style.headerPrefix} ${label1} ${label2}\n`;
       }
       output += result.output;
+      differs = differs || result.differs;
     }
+    // Symlinks and other non-file entries are silently skipped in -N mode
   }
-  return { output };
+  return { output, differs };
 }
 
 export const diffCommand: RuntimeCommand = {
@@ -310,6 +408,14 @@ export const diffCommand: RuntimeCommand = {
       };
     }
 
+    // Build the GNU-style header prefix: "diff -r" + any other flags
+    let headerPrefix = "diff -r";
+    if (flags.unified) headerPrefix += "u";
+    if (flags.context) headerPrefix += "c";
+    if (flags.newFile) headerPrefix += "N";
+    if (flags.ignoreCase) headerPrefix += "i";
+    if (flags.brief) headerPrefix += "q";
+
     const style: DiffStyle = {
       unified: flags.unified,
       context: flags.context,
@@ -317,6 +423,7 @@ export const diffCommand: RuntimeCommand = {
       reportSame: flags.reportSame,
       ignoreCase: flags.ignoreCase,
       newFile: flags.newFile,
+      headerPrefix,
     };
 
     const files = parsed.result.positional;
@@ -336,16 +443,29 @@ export const diffCommand: RuntimeCommand = {
       if (s1?.isFile && s2?.isDirectory) {
         // File vs dir: compare file against dir/basename — two-file diff
         const f2Resolved = `${f2}/${f1.split("/").pop()}`;
-        const c1 = await readVfsFile(ctx, f1);
+        let c1: string;
+        try {
+          c1 = await readVfsFile(ctx, f1);
+        } catch {
+          return {
+            stdout: "",
+            stderr: `diff: ${f1}: No such file or directory\n`,
+            exitCode: 2,
+          };
+        }
         let c2: string;
         try {
           c2 = await readVfsFile(ctx, f2Resolved);
         } catch {
-          return {
-            stdout: `Only in ${f1.split("/").slice(0, -1).join("/") || "."}: ${f1.split("/").pop()}\n`,
-            stderr: "",
-            exitCode: 1,
-          };
+          if (style.newFile) {
+            c2 = "";
+          } else {
+            return {
+              stdout: "",
+              stderr: `diff: ${f2Resolved}: No such file or directory\n`,
+              exitCode: 2,
+            };
+          }
         }
         const result = compareContents(f1, f2Resolved, c1, c2, style);
         return {
@@ -360,13 +480,26 @@ export const diffCommand: RuntimeCommand = {
         try {
           c1 = await readVfsFile(ctx, f1Resolved);
         } catch {
+          if (style.newFile) {
+            c1 = "";
+          } else {
+            return {
+              stdout: "",
+              stderr: `diff: ${f1Resolved}: No such file or directory\n`,
+              exitCode: 2,
+            };
+          }
+        }
+        let c2: string;
+        try {
+          c2 = await readVfsFile(ctx, f2);
+        } catch {
           return {
-            stdout: `Only in ${f2.split("/").slice(0, -1).join("/") || "."}: ${f2.split("/").pop()}\n`,
-            stderr: "",
-            exitCode: 1,
+            stdout: "",
+            stderr: `diff: ${f2}: No such file or directory\n`,
+            exitCode: 2,
           };
         }
-        const c2 = await readVfsFile(ctx, f2);
         const result = compareContents(f1Resolved, f2, c1, c2, style);
         return {
           stdout: result.output,
