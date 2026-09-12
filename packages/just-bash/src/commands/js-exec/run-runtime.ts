@@ -452,6 +452,7 @@ const guestSetupSource = (
   serializedCwd: string,
   hasInvokeTool: boolean,
   hostNamespace: string,
+  maxFileReadBytes: number,
 ): string => `
 (function() {
   var host = globalThis[${JSON.stringify(hostNamespace)}];
@@ -899,9 +900,7 @@ async function executeWithRunInner(
       }
       return bytes;
     }
-    throw new TypeError(
-      "File data must be a string, Buffer, Uint8Array, or byte array",
-    );
+    throw new TypeError("File data must be a string, Buffer, Uint8Array, or byte array");
   };
   const env = mapToRecord(ctx.env);
   const argv = [options.scriptPath, ...options.scriptArgs];
@@ -989,6 +988,7 @@ async function executeWithRunInner(
                 await ctx.fs.writeFile(resolve(path), toFileData(data)),
             ),
           fsWriteStage: (path: string, data: unknown) =>
+            // biome-ignore lint/suspicious/useAwait: sync host function must return a value
             attempt(async () => {
               const resolved = resolve(path);
               const existing = writeStaging.get(resolved) ?? [];
@@ -1151,6 +1151,7 @@ async function executeWithRunInner(
     serializedCwd,
     ctx.invokeTool !== undefined,
     hostNamespace,
+    maxFileReadBytes,
   );
   const bootstrap = options.bootstrapCode ?? "";
   const isolatedBootstrap =
