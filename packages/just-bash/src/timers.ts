@@ -33,6 +33,22 @@ export const _setTimeout: typeof globalThis.setTimeout = ((
 
 export const _clearTimeout: typeof globalThis.clearTimeout = nativeClearTimeout;
 
+/**
+ * Native setTimeout WITHOUT execution-context binding. `_setTimeout`
+ * binds callbacks to the scheduling execution's defense context, which
+ * DefenseInDepthBox suppresses once that execution deactivates — correct
+ * for intra-execution timers (sleep, fetch deadlines), fatal for host
+ * infrastructure callbacks that must fire AFTER the execution ends
+ * (e.g. idle teardown of a shared worker). Use this for the latter.
+ */
+export const _setTimeoutUnbound: typeof globalThis.setTimeout = ((
+  callback: Parameters<typeof globalThis.setTimeout>[0],
+  delay?: number,
+  ...args: unknown[]
+) => {
+  return nativeSetTimeout(callback, delay, ...args);
+}) as typeof globalThis.setTimeout;
+
 const MAX_NATIVE_TIMEOUT_MS = 2_147_483_647;
 
 export interface FiniteTimeoutHandle {
