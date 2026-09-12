@@ -40,10 +40,7 @@ const executor = await createExecutor({
   tools: {
     "ns.action": {
       description: "What it does",
-      execute: async (args: { /* shape */ }, { abortSignal }) => {
-        // Forward abortSignal to cancellable I/O.
-        return { /* JSON-serializable */ };
-      },
+      execute: async (args: { /* shape */ }) => ({ /* JSON-serializable */ }),
     },
   },
 });

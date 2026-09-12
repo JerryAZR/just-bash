@@ -4,7 +4,7 @@
  * Builds an `ExecutorHandle` containing:
  *   - `commands`: bash namespace commands derived from inline tools and/or
  *     SDK-discovered tools, ready to pass to `new Bash({ customCommands })`
- *   - `invokeTool`: a `(path, argsJson, abortSignal) => Promise<string>` callback to wire
+ *   - `invokeTool`: a `(path, argsJson) => Promise<string>` callback to wire
  *     into `new Bash({ javascript: { invokeTool } })`
  *   - `sdk?`: the SDK handle when `setup` was provided, exposed for advanced
  *     use (e.g. listing sources)
@@ -35,8 +35,6 @@ type SDKSourceMeta = {
   name?: string;
 };
 
-const neverAbortSignal = new AbortController().signal;
-
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -49,11 +47,7 @@ export interface ExecutorHandle {
    * Routes inline tool calls directly and SDK-tool calls through the
    * approval/elicitation pipeline.
    */
-  invokeTool: (
-    path: string,
-    argsJson: string,
-    abortSignal?: AbortSignal,
-  ) => Promise<string>;
+  invokeTool: (path: string, argsJson: string) => Promise<string>;
   /**
    * SDK handle. Present only when `setup` was provided. Use it to inspect
    * sources, list tools, or close the executor when done.
@@ -94,14 +88,11 @@ export async function createExecutor(
   const inlineInvokeTool = async (
     path: string,
     argsJson: string,
-    abortSignal: AbortSignal,
   ): Promise<string> => {
-    abortSignal.throwIfAborted();
     const tool = inlineTools[path];
     if (!tool) throw new Error(`Unknown tool: ${path}`);
     const args = parseToolArgs(argsJson);
-    const result = await tool.execute(args, { abortSignal });
-    abortSignal.throwIfAborted();
+    const result = await tool.execute(args);
     return result !== undefined ? JSON.stringify(result) : "";
   };
 
@@ -111,18 +102,17 @@ export async function createExecutor(
       commands: exposeAsCommands
         ? buildNamespaceCommands(allEntries, inlineInvokeTool)
         : [],
-      invokeTool: (path, argsJson, abortSignal = neverAbortSignal) =>
-        inlineInvokeTool(path, argsJson, abortSignal),
+      invokeTool: inlineInvokeTool,
     };
   }
 
   // SDK path: boot SDK, run user setup, list discovered tools, build a merged
   // invokeTool that prefers inline tools and falls through to the SDK pipeline.
-  const {
-    invokeTool: invokeSDKTool,
-    sdk,
-    rawExecutor,
-  } = await initExecutorSDK(config.setup, config.plugins, config.onElicitation);
+  const { sdk, rawExecutor } = await initExecutorSDK(
+    config.setup,
+    config.plugins,
+    config.onElicitation,
+  );
 
   const discoveredTools = (await sdk.tools.list()) as {
     id: string;
@@ -137,9 +127,7 @@ export async function createExecutor(
   const sdkInvokeTool = async (
     path: string,
     argsJson: string,
-    abortSignal: AbortSignal,
   ): Promise<string> => {
-    abortSignal.throwIfAborted();
     const args = parseToolArgs(argsJson);
 
     if (approval && approval !== "allow-all") {
@@ -165,7 +153,6 @@ export async function createExecutor(
         reason: approvalLabel ?? `Tool ${path} invoked`,
         approvalLabel,
       });
-      abortSignal.throwIfAborted();
       if (!decision.approved) {
         throw new Error(
           `Tool invocation denied: ${path}${
@@ -175,8 +162,7 @@ export async function createExecutor(
       }
     }
 
-    const result = await invokeSDKTool(path, args, abortSignal);
-    abortSignal.throwIfAborted();
+    const result = await rawExecutor.tools.invoke(path, args);
 
     return result !== undefined ? JSON.stringify(result) : "";
   };
@@ -184,12 +170,11 @@ export async function createExecutor(
   const invokeTool = async (
     path: string,
     argsJson: string,
-    abortSignal: AbortSignal = neverAbortSignal,
   ): Promise<string> => {
     if (Object.hasOwn(inlineTools, path)) {
-      return inlineInvokeTool(path, argsJson, abortSignal);
+      return inlineInvokeTool(path, argsJson);
     }
-    return sdkInvokeTool(path, argsJson, abortSignal);
+    return sdkInvokeTool(path, argsJson);
   };
 
   return {
