@@ -1491,10 +1491,28 @@ async function executeCode(
     // Must always run so .then() chains work in both script and module mode.
     // Must happen before exit so bridge is still alive. Modules use the native
     // promise bridge to wait for top-level await without polling the VM state.
+    //
+    // Loop until no more jobs execute: JS_ExecutePendingJob runs one job per
+    // call, and jobs that schedule more jobs (e.g. Promise.resolve().then()
+    // inside a .then()) may not all drain in a single pass.  We've seen a
+    // class of CI failures where the guest's final output is lost — the
+    // microtask that would produce it never fires.  The loop is the standard
+    // QuickJS drain pattern; the iteration cap prevents runaway chains.
     const moduleCompletion = input.isModule
       ? context.resolvePromise(result.value)
       : undefined;
-    const pendingResult = runtime.executePendingJobs();
+    const MAX_DRAIN_ITERATIONS = 10_000;
+    let pendingResult = runtime.executePendingJobs();
+    let drainIterations = 1;
+    while (
+      !("error" in pendingResult && pendingResult.error) &&
+      typeof pendingResult.value === "number" &&
+      pendingResult.value > 0 &&
+      drainIterations < MAX_DRAIN_ITERATIONS
+    ) {
+      pendingResult = runtime.executePendingJobs();
+      drainIterations++;
+    }
     if ("error" in pendingResult && pendingResult.error) {
       if (isProcessExit(context, pendingResult.error, processExitMarker)) {
         pendingResult.error.dispose();
