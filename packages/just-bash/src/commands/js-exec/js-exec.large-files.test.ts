@@ -68,3 +68,29 @@ describe("write data type strictness", () => {
     expect(cat.exitCode).toBe(1);
   }, 30_000);
 });
+
+describe("configurable QuickJS memory limit", () => {
+  it("uses maxJsMemoryBytes from executionLimits", async () => {
+    // Default 64MB heap can't hold a 100MB allocation.
+    const small = new Bash({
+      javascript: true,
+      executionLimits: { maxJsMemoryBytes: 64 * 1024 * 1024 },
+    });
+    const smallResult = await small.exec(
+      `js-exec -c "try { var b = Buffer.alloc(100 * 1024 * 1024); console.log('ok'); } catch(e) { console.log('oom'); }"`,
+    );
+    expectExecResult(smallResult, { stdout: "oom\n" });
+
+    // Raised 256MB heap can.
+    const large = new Bash({
+      javascript: true,
+      executionLimits: { maxJsMemoryBytes: 256 * 1024 * 1024 },
+    });
+    const largeResult = await large.exec(
+      `js-exec -c "try { var b = Buffer.alloc(100 * 1024 * 1024); console.log('ok', b.length); } catch(e) { console.log('oom'); }"`,
+    );
+    expectExecResult(largeResult, {
+      stdout: `ok ${100 * 1024 * 1024}\n`,
+    });
+  }, 60_000);
+});

@@ -51,6 +51,8 @@ export interface JsExecWorkerInput {
   isModule?: boolean;
   stripTypes?: boolean;
   timeoutMs?: number;
+  /** QuickJS heap limit in bytes. Defaults to 64MB. */
+  memoryBytes?: number;
   /** When true, the QuickJS guest gets a `tools` proxy that calls the host's invokeTool hook. */
   hasInvokeTool?: boolean;
 }
@@ -1209,7 +1211,7 @@ async function executeCode(
   let processExitMarker: QuickJSHandle | undefined;
   try {
     runtime = qjs.newRuntime();
-    runtime.setMemoryLimit(MEMORY_LIMIT);
+    runtime.setMemoryLimit(input.memoryBytes ?? MEMORY_LIMIT);
 
     // Set up interrupt handler for infinite loop protection.
     // This is a loose backstop — timeouts (via worker termination) are the real

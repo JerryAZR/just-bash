@@ -688,6 +688,7 @@ async function executeJSInner(
     isModule,
     stripTypes,
     timeoutMs,
+    memoryBytes: ctx.limits.maxJsMemoryBytes,
     hasInvokeTool: ctx.invokeTool !== undefined,
   };
 

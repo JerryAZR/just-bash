@@ -118,6 +118,9 @@ export interface ExecutionLimits {
   /** Maximum JavaScript execution time in milliseconds (normal default: 30000) */
   maxJsTimeoutMs?: number;
 
+  /** Maximum QuickJS heap size in bytes (normal default: 64 MiB) */
+  maxJsMemoryBytes?: number;
+
   /** Maximum glob filesystem operations (normal default: 1000000) */
   maxGlobOperations?: number;
 
@@ -200,6 +203,7 @@ const DEFAULT_LIMITS: Required<ExecutionLimits> = {
   maxSqliteTimeoutMs: 30000,
   maxPythonTimeoutMs: 30000,
   maxJsTimeoutMs: 30000,
+  maxJsMemoryBytes: 64 * 1024 * 1024,
   maxGlobOperations: 1000000,
   maxStringLength: 64 * 1024 * 1024,
   maxArrayElements: 1000000,
@@ -325,6 +329,7 @@ export function resolveLimits(
     maxPythonTimeoutMs:
       userLimits.maxPythonTimeoutMs ?? defaults.maxPythonTimeoutMs,
     maxJsTimeoutMs: userLimits.maxJsTimeoutMs ?? defaults.maxJsTimeoutMs,
+    maxJsMemoryBytes: userLimits.maxJsMemoryBytes ?? defaults.maxJsMemoryBytes,
     maxGlobOperations:
       userLimits.maxGlobOperations ?? defaults.maxGlobOperations,
     maxStringLength: userLimits.maxStringLength ?? defaults.maxStringLength,
