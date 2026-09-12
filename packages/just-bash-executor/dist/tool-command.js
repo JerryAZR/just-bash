@@ -200,13 +200,12 @@ function formatSubcommandHelp(namespace, sub) {
     return lines.join("\n");
 }
 // ── Command Factory ─────────────────────────────────────────────
-const neverAbortSignal = new AbortController().signal;
 /**
  * Create a namespace command that dispatches to tool subcommands.
  *
  * @param namespace - Command name (e.g. "math", "countries")
  * @param subcommands - Subcommand definitions
- * @param invokeTool - Tool invoker: (toolPath, argsJson, abortSignal) → resultJson
+ * @param invokeTool - Tool invoker: (toolPath, argsJson) → resultJson
  */
 function createNamespaceCommand(namespace, subcommands, invokeTool) {
     // Build lookup: subcommand name → tool info (including aliases)
@@ -256,7 +255,7 @@ function createNamespaceCommand(namespace, subcommands, invokeTool) {
                     };
                 }
                 const argsJson = Object.keys(parsed).length > 0 ? JSON.stringify(parsed) : "";
-                const resultJson = await invokeTool(sub.originalPath, argsJson, ctx.signal ?? neverAbortSignal);
+                const resultJson = await invokeTool(sub.originalPath, argsJson);
                 const stdout = resultJson ? `${resultJson}\n` : "";
                 return { stdout, stderr: "", exitCode: 0 };
             }
