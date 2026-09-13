@@ -90,7 +90,22 @@ export function dirname(path: string): string {
  * Resolve a relative path against a base directory.
  * If `path` is absolute, it is normalized and returned directly.
  */
+/**
+ * On Windows, translate a drive-letter path to the Git Bash convention:
+ * `C:\foo\bar` or `C:/foo/bar` becomes `/c/foo/bar`.  Only applies on
+ * win32 — on POSIX a path like `C:\foo` is a valid relative filename
+ * and must not be rewritten.
+ */
+function translateWindowsDrivePath(path: string): string {
+  if (process.platform !== "win32") return path;
+  if (!/^[A-Za-z]:[\\/]/.test(path)) return path;
+  const drive = path[0].toLowerCase();
+  const rest = path.slice(2).replace(/\\/g, "/");
+  return `/${drive}${rest}`;
+}
+
 export function resolvePath(base: string, path: string): string {
+  path = translateWindowsDrivePath(path);
   if (path.startsWith("/")) {
     return normalizePath(path);
   }
