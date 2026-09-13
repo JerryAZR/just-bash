@@ -1,5 +1,19 @@
 # just-bash
 
+## 3.9.0
+
+### Minor Changes
+
+- [`00e40f9`](https://github.com/JerryAZR/just-bash/commit/00e40f927dfa0c6b77cadf063be094282ced2a5a) Thanks [@JerryAZR](https://github.com/JerryAZR)! - Add `diff -r` (recursive directory comparison), `diff -rq` (brief recursive), and `diff -N` (treat absent files as empty). No new dependencies.
+
+- [`00e40f9`](https://github.com/JerryAZR/just-bash/commit/00e40f927dfa0c6b77cadf063be094282ced2a5a) Thanks [@JerryAZR](https://github.com/JerryAZR)! - Expose `maxJsMemoryBytes` in `ExecutionLimits` — the QuickJS heap limit (default 64MB) is now configurable per Bash instance. This is the only real cap on js-exec read/write sizes.
+
+- [`00e40f9`](https://github.com/JerryAZR/just-bash/commit/00e40f927dfa0c6b77cadf063be094282ced2a5a) Thanks [@JerryAZR](https://github.com/JerryAZR)! - Add `readOnly` option to `VfsTemplateOptions` — when true, all fork overlay mounts are read-only (EROFS on writes).
+
+### Patch Changes
+
+- [`00e40f9`](https://github.com/JerryAZR/just-bash/commit/00e40f927dfa0c6b77cadf063be094282ced2a5a) Thanks [@JerryAZR](https://github.com/JerryAZR)! - Fix a class of CI failures where js-exec guest output was lost: loop `executePendingJobs()` until all QuickJS jobs drain, not just the first batch.
+
 ## 3.8.0
 
 ### Minor Changes
