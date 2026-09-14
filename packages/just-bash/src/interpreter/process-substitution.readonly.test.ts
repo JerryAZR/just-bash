@@ -144,7 +144,7 @@ describe("process substitution - read-only /dev/fd is not scratch space", () => 
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(
       "mkdir: cannot create directory '/dev/fd/sub': " +
-        "EROFS: read-only file system, mkdir '/dev/fd/sub'\n",
+        "Read-only file system\n",
     );
     expect(result.exitCode).toBe(1);
   });

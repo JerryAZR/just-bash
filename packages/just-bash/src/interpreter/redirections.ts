@@ -205,7 +205,6 @@ async function openOutputEntry(
   target: string,
   append: boolean,
   isClobber: boolean,
-  handleWriteError = true,
 ): Promise<{ entry?: FdEntry; error?: ExecResult }> {
   const filePath = ctx.fs.resolvePath(ctx.state.cwd, target);
   const error = await checkOutputRedirectTarget(ctx, filePath, target, {
@@ -227,8 +226,7 @@ async function openOutputEntry(
   try {
     if (append) await ctx.fs.appendFile(filePath, "", "binary");
     else await ctx.fs.writeFile(filePath, "", "binary");
-  } catch (error) {
-    if (!handleWriteError) throw error;
+  } catch {
     return {
       error: makeResult(
         "",

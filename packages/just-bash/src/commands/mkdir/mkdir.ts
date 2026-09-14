@@ -51,6 +51,10 @@ export const mkdirCommand: RuntimeCommand = {
           stderr += `mkdir: cannot create directory '${dir}': No such file or directory\n`;
         } else if (isFsErrorCode(error, "EEXIST")) {
           stderr += `mkdir: cannot create directory '${dir}': File exists\n`;
+        } else if (isFsErrorCode(error, "EROFS")) {
+          stderr += `mkdir: cannot create directory '${dir}': Read-only file system\n`;
+        } else if (isFsErrorCode(error, "EACCES")) {
+          stderr += `mkdir: cannot create directory '${dir}': Permission denied\n`;
         } else {
           stderr += `mkdir: cannot create directory '${dir}': ${sanitizeErrorMessage(message)}\n`;
         }

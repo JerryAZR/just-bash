@@ -127,7 +127,7 @@ describe("just-bash CLI", () => {
     it("should block mkdir by default", () => {
       const result = runCli(["-c", "mkdir newdir", "--root", tempDir]);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain("EROFS");
+      expect(result.stderr).toContain("Read-only file system");
     });
 
     it("should block rm by default", () => {
