@@ -121,7 +121,7 @@ describe("just-bash CLI", () => {
         tempDir,
       ]);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain("EROFS");
+      expect(result.stderr).toContain("cannot open redirect target");
     });
 
     it("should block mkdir by default", () => {

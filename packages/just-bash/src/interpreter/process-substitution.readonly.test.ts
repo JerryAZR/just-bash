@@ -23,9 +23,10 @@ function readOnlyBash(): Bash {
 describe("process substitution - read-only filesystem", () => {
   it("still refuses ordinary writes", async () => {
     const env = readOnlyBash();
-    await expect(env.exec("echo nope > out.txt")).rejects.toThrow(
-      "EROFS: read-only file system, write '/home/user/project/out.txt'",
-    );
+    const result = await env.exec("echo nope > out.txt");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("bash: out.txt: cannot open redirect target\n");
+    expect(result.exitCode).toBe(1);
   });
 
   it("reads from <(cmd)", async () => {
@@ -115,23 +116,26 @@ describe("process substitution - read-only filesystem", () => {
 describe("process substitution - read-only /dev/fd is not scratch space", () => {
   it("refuses a write to an unallocated descriptor", async () => {
     const env = readOnlyBash();
-    await expect(
-      env.exec("cat <(true); echo data > /dev/fd/99"),
-    ).rejects.toThrow("EROFS: read-only file system, write '/dev/fd/99'");
+    const result = await env.exec("cat <(true); echo data > /dev/fd/99");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("cannot open redirect target");
+    expect(result.exitCode).toBe(1);
   });
 
   it("refuses an append to an unallocated descriptor", async () => {
     const env = readOnlyBash();
-    await expect(
-      env.exec("cat <(true); echo data >> /dev/fd/99"),
-    ).rejects.toThrow("EROFS: read-only file system, append '/dev/fd/99'");
+    const result = await env.exec("cat <(true); echo data >> /dev/fd/99");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("cannot open redirect target");
+    expect(result.exitCode).toBe(1);
   });
 
   it("refuses a write even with a descriptor still live", async () => {
     const env = readOnlyBash();
-    await expect(
-      env.exec("cat <(true) <(echo data > /dev/fd/99)"),
-    ).rejects.toThrow("EROFS: read-only file system, write '/dev/fd/99'");
+    const result = await env.exec("cat <(true) <(echo data > /dev/fd/99)");
+    expect(result.stderr).toContain("cannot open redirect target");
+    // Outer cat succeeds; inner echo's redirect failure doesn't propagate
+    expect(result.exitCode).toBe(0);
   });
 
   it("refuses creating a directory under /dev/fd", async () => {
@@ -147,13 +151,13 @@ describe("process substitution - read-only /dev/fd is not scratch space", () => 
 
   it("behaves the same whether or not a substitution ran first", async () => {
     const before = readOnlyBash();
-    await expect(before.exec("echo data > /dev/fd/99")).rejects.toThrow(
-      "EROFS: read-only file system, write '/dev/fd/99'",
-    );
+    const r1 = await before.exec("echo data > /dev/fd/99");
+    expect(r1.stderr).toContain("cannot open redirect target");
+    expect(r1.exitCode).toBe(1);
     const after = readOnlyBash();
-    await expect(
-      after.exec("cat <(true); echo data > /dev/fd/99"),
-    ).rejects.toThrow("EROFS: read-only file system, write '/dev/fd/99'");
+    const r2 = await after.exec("cat <(true); echo data > /dev/fd/99");
+    expect(r2.stderr).toContain("cannot open redirect target");
+    expect(r2.exitCode).toBe(1);
   });
 
   it("leaves a writable filesystem's /dev/fd alone", async () => {

@@ -798,7 +798,7 @@ async function prepareRedirectionsWithState(
             index,
           );
         }
-        const opened = await openOutputEntry(ctx, target, false, false, false);
+        const opened = await openOutputEntry(ctx, target, false, false);
         if (opened.error) return fail(opened.error, index);
         const entry = opened.entry as FdEntry;
         dupSources.set(index, {
@@ -916,7 +916,6 @@ async function prepareRedirectionsWithState(
         target,
         redir.operator === ">>" || redir.operator === "&>>",
         redir.operator === ">|",
-        false,
       );
       if (opened.error) return fail(opened.error, index);
       const entry = opened.entry as FdEntry;
