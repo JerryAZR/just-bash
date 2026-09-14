@@ -134,7 +134,7 @@ describe("just-bash CLI", () => {
       fs.writeFileSync(path.join(tempDir, "file.txt"), "content");
       const result = runCli(["-c", "rm file.txt", "--root", tempDir]);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain("EROFS");
+      expect(result.stderr).toContain("Read-only file system");
     });
 
     it("should allow reads in readOnly mode", () => {

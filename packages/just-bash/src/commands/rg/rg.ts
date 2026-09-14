@@ -88,6 +88,7 @@ EXAMPLES:
 };
 
 export const rgCommand: RuntimeCommand = {
+  handlesOwnVersion: true,
   name: "rg",
 
   async execute(
@@ -96,6 +97,14 @@ export const rgCommand: RuntimeCommand = {
   ): Promise<ExecResult> {
     if (hasHelpFlag(args)) {
       return showHelp(rgHelp);
+    }
+
+    if (args.includes("--version") || args.includes("-V")) {
+      return {
+        stdout: "rg (just-bash)\n",
+        stderr: "",
+        exitCode: 0,
+      };
     }
 
     if (args.includes("--type-list")) {

@@ -587,6 +587,7 @@ export class Bash {
       trusted,
       internalIsExtension: isExtension,
       internalOriginalCommand: originalCommand,
+      handlesOwnVersion: command.handlesOwnVersion,
       execute: (args, context) => command.execute(args, context),
     };
     this.commands.set(command.name, runtimeCommand);

@@ -377,6 +377,7 @@ async function diffTreeVsEmpty(
 }
 
 export const diffCommand: RuntimeCommand = {
+  handlesOwnVersion: true,
   name: "diff",
 
   async execute(

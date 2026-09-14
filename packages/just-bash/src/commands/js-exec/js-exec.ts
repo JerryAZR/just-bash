@@ -717,6 +717,7 @@ async function executeJSInner(
 }
 
 export const jsExecCommand: RuntimeCommand = {
+  handlesOwnVersion: true,
   name: "js-exec",
 
   async execute(

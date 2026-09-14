@@ -71,6 +71,8 @@ export const rmCommand: RuntimeCommand = {
           stderr += `rm: cannot remove '${path}': No such file or directory\n`;
         } else if (isFsErrorCode(error, "ENOTEMPTY")) {
           stderr += `rm: cannot remove '${path}': Directory not empty\n`;
+        } else if (isFsErrorCode(error, "EROFS")) {
+          stderr += `rm: cannot remove '${path}': Read-only file system\n`;
         } else {
           stderr += `rm: cannot remove '${path}': ${sanitizeErrorMessage(message)}\n`;
         }

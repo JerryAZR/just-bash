@@ -189,6 +189,8 @@ export const mvCommand: RuntimeCommand = {
         const message = getErrorMessage(error);
         if (isFsErrorCode(error, "ENOENT")) {
           stderr += `mv: cannot stat '${src}': No such file or directory\n`;
+        } else if (isFsErrorCode(error, "EROFS")) {
+          stderr += `mv: cannot move '${src}': Read-only file system\n`;
         } else {
           stderr += `mv: cannot move '${src}': ${message}\n`;
         }

@@ -13,6 +13,8 @@ type CommandLoader = () => Promise<RuntimeCommand>;
 interface LazyCommandDef<T extends string = string> {
   name: T;
   load: CommandLoader;
+  /** Forwarded to the lazy wrapper so the dispatch can check it before loading. */
+  handlesOwnVersion?: boolean;
 }
 
 /** All available built-in command names (excludes network commands) */
@@ -506,6 +508,7 @@ if (typeof __BROWSER__ === "undefined" || !__BROWSER__) {
   pythonCommandLoaders.push({
     name: "python3",
     load: async () => (await import("./python3/python3.js")).python3Command,
+    handlesOwnVersion: true,
   });
   pythonCommandLoaders.push({
     name: "python",
@@ -519,6 +522,7 @@ if (typeof __BROWSER__ === "undefined" || !__BROWSER__) {
   jsCommandLoaders.push({
     name: "js-exec",
     load: async () => (await import("./js-exec/js-exec.js")).jsExecCommand,
+    handlesOwnVersion: true,
   });
   jsCommandLoaders.push({
     name: "node",
@@ -543,6 +547,7 @@ const cache = new Map<string, RuntimeCommand>();
 function createLazyCommand(def: LazyCommandDef): RuntimeCommand {
   return {
     name: def.name,
+    handlesOwnVersion: def.handlesOwnVersion,
     async execute(
       args: string[],
       ctx: RuntimeCommandContext,

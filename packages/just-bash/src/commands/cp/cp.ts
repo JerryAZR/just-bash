@@ -199,6 +199,8 @@ export const cpCommand: RuntimeCommand = {
         const message = getErrorMessage(error);
         if (isFsErrorCode(error, "ENOENT")) {
           stderr += `cp: cannot stat '${src}': No such file or directory\n`;
+        } else if (isFsErrorCode(error, "EROFS")) {
+          stderr += `cp: cannot create regular file '${dest}': Read-only file system\n`;
         } else {
           stderr += `cp: cannot copy '${src}': ${message}\n`;
         }

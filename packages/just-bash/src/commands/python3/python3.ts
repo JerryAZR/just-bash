@@ -630,6 +630,7 @@ async function executePython(
 }
 
 export const python3Command: RuntimeCommand = {
+  handlesOwnVersion: true,
   name: "python3",
 
   async execute(

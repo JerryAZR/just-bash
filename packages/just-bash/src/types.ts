@@ -329,6 +329,12 @@ export interface Command {
   trusted?: boolean;
   /** @internal Marks host extensions that receive a least-authority budget. */
   internalIsExtension?: boolean;
+  /**
+   * Set to true when the command handles --version itself (e.g. python3
+   * shows Python's version, not just-bash's). When unset, the dispatch
+   * intercepts --version and returns "<cmd> (just-bash)".
+   */
+  handlesOwnVersion?: boolean;
   execute(args: string[], ctx: ResolvedCommandContext): Promise<ExecResult>;
 }
 

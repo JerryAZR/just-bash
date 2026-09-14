@@ -947,6 +947,16 @@ export async function executeExternalCommand(
   };
 
   try {
+    // Generic --version: commands that don't handle their own version
+    // get a standard "<cmd> (just-bash)" response.
+    if (!cmd.handlesOwnVersion && args.includes("--version")) {
+      return {
+        stdout: `${commandName} (just-bash)\n`,
+        stderr: "",
+        exitCode: 0,
+      };
+    }
+
     const runCommand = (): Promise<ExecResult> =>
       awaitWithDefenseContext(
         ctx.requireDefenseContext,
