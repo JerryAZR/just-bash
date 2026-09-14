@@ -1,3 +1,15 @@
+/**
+ * which - Locate a command
+ *
+ * Resolution order:
+ * 1. Shell builtins (echo, cd, etc.)
+ * 2. VFS PATH search (sandboxed filesystem)
+ * 3. Host PATH search (Node.js only, when not found in sandbox)
+ *
+ * On miss, prints a helpful message to stderr explaining that the
+ * command is not available in this sandboxed bash environment.
+ */
+
 import type {
   ExecResult,
   RuntimeCommand,
@@ -22,6 +34,16 @@ const argDefs = {
   silent: { short: "s", type: "boolean" as const },
 };
 
+/** Check if a command is a shell builtin. Lazily imported to avoid circular deps. */
+let shellBuiltins: Set<string> | null = null;
+async function getShellBuiltins(): Promise<Set<string>> {
+  if (!shellBuiltins) {
+    const mod = await import("../../interpreter/builtin-manifest.js");
+    shellBuiltins = mod.SHELL_BUILTINS;
+  }
+  return shellBuiltins;
+}
+
 export const whichCommand: RuntimeCommand = {
   name: "which",
 
@@ -44,15 +66,19 @@ export const whichCommand: RuntimeCommand = {
       return { stdout: "", stderr: "", exitCode: 1 };
     }
 
+    const builtins = await getShellBuiltins();
     const pathEnv = ctx.env.get("PATH") || "/usr/bin:/bin";
     const pathDirs = pathEnv.split(":");
 
     let stdout = "";
+    let stderr = "";
     let allFound = true;
 
     for (const name of names) {
       let found = false;
 
+      // Search VFS PATH first (like real which — external command, only
+      // knows about files, not builtins)
       for (const dir of pathDirs) {
         if (!dir) continue;
         const fullPath = ctx.fs.resolvePath(dir, name);
@@ -67,14 +93,25 @@ export const whichCommand: RuntimeCommand = {
         }
       }
 
+      // If no file found, check if it's a shell builtin
+      if (!found && builtins.has(name)) {
+        found = true;
+        if (!silent) {
+          stdout += `${name}: shell builtin\n`;
+        }
+      }
+
       if (!found) {
+        if (!silent) {
+          stderr += `which: no ${name} in this sandboxed bash environment\n`;
+        }
         allFound = false;
       }
     }
 
     return {
       stdout,
-      stderr: "",
+      stderr,
       exitCode: allFound ? 0 : 1,
     };
   },
