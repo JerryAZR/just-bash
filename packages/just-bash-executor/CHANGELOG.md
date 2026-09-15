@@ -1,5 +1,12 @@
 # @just-bash/executor
 
+## 10.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`c8b5eb6`](https://github.com/JerryAZR/just-bash/commit/c8b5eb67659a3269e7410353573be829026a8214), [`c8b5eb6`](https://github.com/JerryAZR/just-bash/commit/c8b5eb67659a3269e7410353573be829026a8214)]:
+  - @jerryan/just-bash@3.10.0
+
 ## 9.0.0
 
 ### Patch Changes

@@ -1,5 +1,29 @@
 # just-bash
 
+## 3.10.0
+
+### Minor Changes
+
+- [`c8b5eb6`](https://github.com/JerryAZR/just-bash/commit/c8b5eb67659a3269e7410353573be829026a8214) Thanks [@JerryAZR](https://github.com/JerryAZR)! - feat: generic --version, EROFS GNU messages, which improvements
+
+  - All commands respond to `--version` with `<cmd> (just-bash)` via
+    dispatch-level interception. Commands that handle their own version
+    (python3, js-exec, diff, rg) set `handlesOwnVersion: true`. Custom
+    commands that handle `--version` must set `handlesOwnVersion: true`
+    to opt out of the generic response.
+  - rm/cp/mv/mkdir map EROFS to "Read-only file system" (GNU style).
+    Redirect failures use errno descriptions ("Read-only file system",
+    "Permission denied", etc.) matching real bash.
+  - `which` checks shell builtins when no file found in PATH, and prints
+    "which: no X in this sandboxed bash environment" on miss.
+  - rg implements `--version`.
+
+- [`c8b5eb6`](https://github.com/JerryAZR/just-bash/commit/c8b5eb67659a3269e7410353573be829026a8214) Thanks [@JerryAZR](https://github.com/JerryAZR)! - feat: Windows drive-letter path translation (win32 only)
+
+  On Windows, `C:\foo\bar` and `C:/foo/bar` are translated to `/c/foo/bar`
+  (Git Bash convention) in `resolvePath`. On POSIX, `C:\foo` is a valid
+  relative filename and is NOT rewritten.
+
 ## 3.9.0
 
 ### Minor Changes
