@@ -217,6 +217,7 @@ const commandLoaders: LazyCommandDef<CommandName>[] = [
   {
     name: "rg",
     load: async () => (await import("./rg/rg.js")).rgCommand,
+    handlesOwnVersion: true,
   },
   {
     name: "sed",
@@ -379,6 +380,7 @@ const commandLoaders: LazyCommandDef<CommandName>[] = [
   {
     name: "diff",
     load: async () => (await import("./diff/diff.js")).diffCommand,
+    handlesOwnVersion: true,
   },
   {
     name: "date",
@@ -513,6 +515,7 @@ if (typeof __BROWSER__ === "undefined" || !__BROWSER__) {
   pythonCommandLoaders.push({
     name: "python",
     load: async () => (await import("./python3/python3.js")).pythonCommand,
+    handlesOwnVersion: true,
   });
 }
 

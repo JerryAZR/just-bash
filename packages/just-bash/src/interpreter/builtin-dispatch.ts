@@ -948,13 +948,20 @@ export async function executeExternalCommand(
 
   try {
     // Generic --version: commands that don't handle their own version
-    // get a standard "<cmd> (just-bash)" response.
-    if (!cmd.handlesOwnVersion && args.includes("--version")) {
-      return {
-        stdout: `${commandName} (just-bash)\n`,
-        stderr: "",
-        exitCode: 0,
-      };
+    // get a standard "<cmd> (just-bash)" response. Only scan args up
+    // to the first "--" terminator — after that, --version is an operand.
+    if (!cmd.handlesOwnVersion) {
+      const beforeTerminator = args.slice(
+        0,
+        args.indexOf("--") === -1 ? undefined : args.indexOf("--"),
+      );
+      if (beforeTerminator.includes("--version")) {
+        return {
+          stdout: `${commandName} (just-bash)\n`,
+          stderr: "",
+          exitCode: 0,
+        };
+      }
     }
 
     const runCommand = (): Promise<ExecResult> =>

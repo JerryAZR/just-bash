@@ -16,7 +16,7 @@ describe("read-only filesystem redirect errors", () => {
     const result = await env.exec('echo x > /file; echo "exit=$?"; echo done');
     expectExecResult(result, {
       stdout: "exit=1\ndone\n",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 0,
     });
   });
@@ -28,7 +28,7 @@ describe("read-only filesystem redirect errors", () => {
     );
     expectExecResult(result, {
       stdout: "",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 1,
     });
   });
@@ -38,7 +38,7 @@ describe("read-only filesystem redirect errors", () => {
     const result = await env.exec("echo x >> /file; echo rc=$?");
     expectExecResult(result, {
       stdout: "rc=1\n",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 0,
     });
   });
@@ -48,7 +48,7 @@ describe("read-only filesystem redirect errors", () => {
     const result = await env.exec("echo x 2> /file; echo rc=$?");
     expectExecResult(result, {
       stdout: "rc=1\n",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 0,
     });
   });
@@ -60,7 +60,7 @@ describe("read-only filesystem redirect errors", () => {
     );
     expectExecResult(result, {
       stdout: "exists=1\n",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 0,
     });
   });
@@ -72,7 +72,7 @@ describe("read-only filesystem redirect errors", () => {
     );
     expectExecResult(result, {
       stdout: "no\n",
-      stderr: "bash: /file: cannot open redirect target\n",
+      stderr: "bash: /file: Read-only file system\n",
       exitCode: 0,
     });
   });

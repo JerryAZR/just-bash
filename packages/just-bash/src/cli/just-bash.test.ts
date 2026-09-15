@@ -121,7 +121,7 @@ describe("just-bash CLI", () => {
         tempDir,
       ]);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain("cannot open redirect target");
+      expect(result.stderr).toContain("Read-only file system");
     });
 
     it("should block mkdir by default", () => {

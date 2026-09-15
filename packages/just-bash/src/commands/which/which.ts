@@ -2,9 +2,8 @@
  * which - Locate a command
  *
  * Resolution order:
- * 1. Shell builtins (echo, cd, etc.)
- * 2. VFS PATH search (sandboxed filesystem)
- * 3. Host PATH search (Node.js only, when not found in sandbox)
+ * 1. VFS PATH search (sandboxed filesystem)
+ * 2. Shell builtins (echo, cd, etc.) — only when no file found
  *
  * On miss, prints a helpful message to stderr explaining that the
  * command is not available in this sandboxed bash environment.

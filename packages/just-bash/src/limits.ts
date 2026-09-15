@@ -262,6 +262,15 @@ const HARDENED_LIMITS: Required<ExecutionLimits> = {
 /**
  * Resolve execution limits by merging user-provided limits with defaults.
  */
+/**
+ * Clamp maxJsMemoryBytes to a safe range for the wasm FFI (i32 param).
+ * Infinity would wrap to 0 via ToInt32, causing instant OOM for all js-exec.
+ */
+function clampJsMemoryBytes(value: number): number {
+  if (!Number.isFinite(value)) return 0xffffffff; // 4GB cap
+  return Math.min(Math.max(0, Math.floor(value)), 0xffffffff);
+}
+
 export function resolveLimits(
   userLimits?: ExecutionLimits,
   profile: ExecutionLimitProfile = "normal",
@@ -329,7 +338,9 @@ export function resolveLimits(
     maxPythonTimeoutMs:
       userLimits.maxPythonTimeoutMs ?? defaults.maxPythonTimeoutMs,
     maxJsTimeoutMs: userLimits.maxJsTimeoutMs ?? defaults.maxJsTimeoutMs,
-    maxJsMemoryBytes: userLimits.maxJsMemoryBytes ?? defaults.maxJsMemoryBytes,
+    maxJsMemoryBytes: clampJsMemoryBytes(
+      userLimits.maxJsMemoryBytes ?? defaults.maxJsMemoryBytes,
+    ),
     maxGlobOperations:
       userLimits.maxGlobOperations ?? defaults.maxGlobOperations,
     maxStringLength: userLimits.maxStringLength ?? defaults.maxStringLength,

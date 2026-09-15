@@ -97,7 +97,8 @@ export function dirname(path: string): string {
  * and must not be rewritten.
  */
 function translateWindowsDrivePath(path: string): string {
-  if (process.platform !== "win32") return path;
+  if (typeof process === "undefined" || process.platform !== "win32")
+    return path;
   if (!/^[A-Za-z]:[\\/]/.test(path)) return path;
   const drive = path[0].toLowerCase();
   const rest = path.slice(2).replace(/\\/g, "/");

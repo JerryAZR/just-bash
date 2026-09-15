@@ -25,7 +25,7 @@ describe("process substitution - read-only filesystem", () => {
     const env = readOnlyBash();
     const result = await env.exec("echo nope > out.txt");
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("bash: out.txt: cannot open redirect target\n");
+    expect(result.stderr).toBe("bash: out.txt: Read-only file system\n");
     expect(result.exitCode).toBe(1);
   });
 
@@ -118,7 +118,7 @@ describe("process substitution - read-only /dev/fd is not scratch space", () => 
     const env = readOnlyBash();
     const result = await env.exec("cat <(true); echo data > /dev/fd/99");
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("cannot open redirect target");
+    expect(result.stderr).toContain("Read-only file system");
     expect(result.exitCode).toBe(1);
   });
 
@@ -126,14 +126,14 @@ describe("process substitution - read-only /dev/fd is not scratch space", () => 
     const env = readOnlyBash();
     const result = await env.exec("cat <(true); echo data >> /dev/fd/99");
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("cannot open redirect target");
+    expect(result.stderr).toContain("Read-only file system");
     expect(result.exitCode).toBe(1);
   });
 
   it("refuses a write even with a descriptor still live", async () => {
     const env = readOnlyBash();
     const result = await env.exec("cat <(true) <(echo data > /dev/fd/99)");
-    expect(result.stderr).toContain("cannot open redirect target");
+    expect(result.stderr).toContain("Read-only file system");
     // Outer cat succeeds; inner echo's redirect failure doesn't propagate
     expect(result.exitCode).toBe(0);
   });
@@ -152,11 +152,11 @@ describe("process substitution - read-only /dev/fd is not scratch space", () => 
   it("behaves the same whether or not a substitution ran first", async () => {
     const before = readOnlyBash();
     const r1 = await before.exec("echo data > /dev/fd/99");
-    expect(r1.stderr).toContain("cannot open redirect target");
+    expect(r1.stderr).toContain("Read-only file system");
     expect(r1.exitCode).toBe(1);
     const after = readOnlyBash();
     const r2 = await after.exec("cat <(true); echo data > /dev/fd/99");
-    expect(r2.stderr).toContain("cannot open redirect target");
+    expect(r2.stderr).toContain("Read-only file system");
     expect(r2.exitCode).toBe(1);
   });
 

@@ -17,6 +17,7 @@ import {
   readBytesFrom,
   utf8ByteLength,
 } from "../encoding.js";
+import { isFsErrorCode } from "../fs/fs-error.js";
 import type { ExecResult } from "../types.js";
 import {
   ControlFlowError,
@@ -226,13 +227,17 @@ async function openOutputEntry(
   try {
     if (append) await ctx.fs.appendFile(filePath, "", "binary");
     else await ctx.fs.writeFile(filePath, "", "binary");
-  } catch {
+  } catch (error) {
+    // Use the errno description like real bash (e.g. "Read-only file
+    // system" for EROFS, "Permission denied" for EACCES).
+    let reason = "cannot open redirect target";
+    if (isFsErrorCode(error, "EROFS")) reason = "Read-only file system";
+    else if (isFsErrorCode(error, "EACCES")) reason = "Permission denied";
+    else if (isFsErrorCode(error, "ENOENT"))
+      reason = "No such file or directory";
+    else if (isFsErrorCode(error, "EISDIR")) reason = "Is a directory";
     return {
-      error: makeResult(
-        "",
-        `bash: ${target}: cannot open redirect target\n`,
-        1,
-      ),
+      error: makeResult("", `bash: ${target}: ${reason}\n`, 1),
     };
   }
   return { entry: { kind: "output", path: filePath, append } };

@@ -35,6 +35,11 @@ export interface LazyCommand {
    * trusted by default for compatibility with existing host integrations.
    */
   trusted?: boolean;
+  /**
+   * Set to true when the command handles --version itself. When unset,
+   * the dispatch intercepts --version and returns "<cmd> (just-bash)".
+   */
+  handlesOwnVersion?: boolean;
   load: () => Promise<Command>;
 }
 
@@ -113,6 +118,7 @@ export function createLazyCustomCommand(lazy: LazyCommand): Command {
   return {
     name: lazy.name,
     trusted: lazy.trusted !== false,
+    handlesOwnVersion: lazy.handlesOwnVersion,
     async execute(
       args: string[],
       ctx: ResolvedCommandContext,
