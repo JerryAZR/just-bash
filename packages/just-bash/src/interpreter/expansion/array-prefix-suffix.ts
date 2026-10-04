@@ -72,6 +72,13 @@ export async function handleArrayDefaultValue(
   }
 
   const paramPart = dqPart.parts[0];
+  // The assignment handler owns rejection of positional and special targets.
+  if (
+    paramPart.operation?.type === "AssignDefault" &&
+    /^(?:\d+|[@*#?$!-])$/.test(paramPart.parameter)
+  ) {
+    return null;
+  }
   const op = paramPart.operation as
     | { type: "DefaultValue"; word?: WordNode; checkEmpty?: boolean }
     | { type: "UseAlternative"; word?: WordNode; checkEmpty?: boolean }

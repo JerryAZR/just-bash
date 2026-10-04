@@ -106,6 +106,16 @@ export async function handleDefaultValue(
   return opCtx.effectiveValue;
 }
 
+export function assertDefaultAssignmentTarget(parameter: string): void {
+  if (/^(?:\d+|[@*#?$!-])$/.test(parameter)) {
+    throw new ExitError(
+      1,
+      "",
+      `bash: $${parameter}: cannot assign in this way\n`,
+    );
+  }
+}
+
 /**
  * Handle AssignDefault operation: ${param:=word}
  */
@@ -118,6 +128,9 @@ export async function handleAssignDefault(
 ): Promise<string> {
   ctx.coverage?.hit("bash:expansion:assign_default");
   const useDefault = opCtx.isUnset || (operation.checkEmpty && opCtx.isEmpty);
+  if (useDefault) {
+    assertDefaultAssignmentTarget(parameter);
+  }
   if (useDefault && operation.word) {
     const defaultValue = await expandWordPartsAsync(
       ctx,
