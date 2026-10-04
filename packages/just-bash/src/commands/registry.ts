@@ -73,6 +73,7 @@ export type CommandName =
   | "xargs"
   | "true"
   | "false"
+  | "yes"
   | "clear"
   | "bash"
   | "sh"
@@ -353,6 +354,10 @@ const commandLoaders: LazyCommandDef<CommandName>[] = [
   {
     name: "false",
     load: async () => (await import("./true/true.js")).falseCommand,
+  },
+  {
+    name: "yes",
+    load: async () => (await import("./yes/yes.js")).yesCommand,
   },
   {
     name: "clear",
