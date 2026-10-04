@@ -48,8 +48,9 @@ export type ExpandWordPartsAsyncFn = (
 ) => Promise<string>;
 
 /**
- * Handle "${arr[@]:-${default[@]}}", "${arr[@]:+${alt[@]}}", and "${arr[@]:=default}"
+ * Handle "${arr[@]:-${default[@]}}" and "${arr[@]:+${alt[@]}}".
  * Also handles "${var:-${default[@]}}" where var is a scalar variable.
+ * Assignment defaults preserve existing array elements when no assignment is needed.
  * When the default value contains an array expansion, each element should become a separate word.
  */
 export async function handleArrayDefaultValue(
@@ -88,6 +89,9 @@ export async function handleArrayDefaultValue(
   const arrayMatch = paramPart.parameter.match(
     /^([a-zA-Z_][a-zA-Z0-9_]*)\[([@*])\]$/,
   );
+  if (op.type === "AssignDefault" && (!arrayMatch || arrayMatch[2] === "*")) {
+    return null;
+  }
 
   // Determine if we should use the alternate/default value
   let shouldUseAlternate: boolean;
@@ -147,6 +151,11 @@ export async function handleArrayDefaultValue(
     if (!shouldUseAlternate) {
       return { values: [varValue], quoted: true };
     }
+  }
+
+  // The assignment handler owns validation and evaluation before writing the target.
+  if (op.type === "AssignDefault") {
+    return null;
   }
 
   // We should use the alternate/default value

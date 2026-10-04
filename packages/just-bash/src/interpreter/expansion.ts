@@ -15,6 +15,7 @@ import type {
   WordNode,
   WordPart,
 } from "../ast/types.js";
+import { utf8ByteLength } from "../encoding.js";
 import { parseArithmeticExpression } from "../parser/arithmetic-parser.js";
 import { Parser } from "../parser/parser.js";
 import { GlobExpander } from "../shell/glob.js";
@@ -112,8 +113,17 @@ async function expandWordPartsAsync(
   inDoubleQuotes = false,
 ): Promise<string> {
   const results: string[] = [];
+  let bytes = 0;
   for (const part of parts) {
-    results.push(await expandPart(ctx, part, inDoubleQuotes));
+    const value = await expandPart(ctx, part, inDoubleQuotes);
+    bytes += utf8ByteLength(value);
+    if (bytes > ctx.limits.maxStringLength) {
+      throw new ExecutionLimitError(
+        `parameter word string limit exceeded (${ctx.limits.maxStringLength} bytes)`,
+        "string_length",
+      );
+    }
+    results.push(value);
   }
   return results.join("");
 }
@@ -996,6 +1006,14 @@ async function expandParameterAsync(
         }
       }
     }
+  }
+
+  // Array counts do not consume the elements' joined contents.
+  if (
+    operation?.type === "Length" &&
+    /^[a-zA-Z_][a-zA-Z0-9_]*\[[@*]\]$/.test(parameter)
+  ) {
+    return handleLength(ctx, parameter, "");
   }
 
   // Operations that handle unset variables should not trigger nounset

@@ -141,6 +141,13 @@ export async function handleAssignDefault(
     const arrayMatch = parameter.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[(.+)\]$/);
     if (arrayMatch) {
       const [, arrayName, subscriptExpr] = arrayMatch;
+      if (subscriptExpr === "@" || subscriptExpr === "*") {
+        throw new ExitError(
+          1,
+          "",
+          `${ctx.state.expansionStderr || ""}bash: ${parameter}: bad array subscript\n`,
+        );
+      }
       // Evaluate subscript as arithmetic expression
       let index: number;
       if (/^\d+$/.test(subscriptExpr)) {
@@ -753,18 +760,16 @@ export function computeIsEmpty(
       // - Quoted "${a[*]:-default}": uses default if IFS-joined result is empty
       // - Unquoted ${a[*]:-default}: like $*, only "empty" if array has no elements
       //   (even if IFS="" makes the joined expansion an empty string)
-      const ifsSep = getIfsSeparator(ctx.state.env);
-      const joined = elements.map(([, v]) => v).join(ifsSep);
       return {
-        isEmpty: inDoubleQuotes ? joined === "" : false,
-        effectiveValue: joined, // Use IFS-joined value instead of space-joined
+        isEmpty: inDoubleQuotes ? value === "" : false,
+        effectiveValue: value,
       };
     }
     // a[@] - empty only if all elements are empty AND there's exactly one
     // (similar to $@ behavior with single empty param)
     return {
       isEmpty: elements.length === 1 && elements.every(([, v]) => v === ""),
-      effectiveValue: elements.map(([, v]) => v).join(" "),
+      effectiveValue: value,
     };
   }
 
