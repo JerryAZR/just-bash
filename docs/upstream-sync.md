@@ -26,10 +26,10 @@ so the next sync doesn't re-review covered ground.
 | `ef8c75d` | fix(worker-bridge): ignore stale wake from previous request (#513) | **Skipped** — moot: fork's two-word protocol eliminates the stale-wake class | — |
 | `4ee035b` | fix: keep shell running when a cancelled command is still loading (#506) | Cherry-picked (loader adapted) | `d13cf6f` |
 | `0353b22` | fix(sed): keep leading whitespace after a\, i\ and c\ (#487) | Cherry-picked | `8966372` |
-| `a36c324` | fix: support Bun module accessor descriptors (#443) | **Deferred** — only relevant for Bun support; needs adaptation | — |
+| `a36c324` | fix: support Bun module accessor descriptors (#443) | **Deferred** — Bun is not a current target; revisit if that changes | — |
 | `128feaa` | fix: virtual executable name for Python workers (#444) | Cherry-picked | `4a3e413` |
 | `017a911` | fix(interpreter): loop left via break/continue status 0 (#417) | Cherry-picked | `2a8626d` |
-| `cc35fab` | feat(mktemp): GNU-compatible mktemp (#377) | **Pending** — needs OverlayTree-specific createExclusive design | — |
+| `cc35fab` | feat(mktemp): GNU-compatible mktemp (#377) | Cherry-picked (OverlayFs createExclusive rewritten for OverlayTree) | `5f0d4f6` |
 | `31ac823` | fix(find): report unreadable dir and keep going (#414) | Cherry-picked | `205648d` |
 | `7313062` | fix(interpreter): preserve associative array compound values (#445) | Cherry-picked | `66565ae` |
 | `5d19cc3` | feat(yes): implement the yes command (#409) | Cherry-picked | `8c18f71` |
