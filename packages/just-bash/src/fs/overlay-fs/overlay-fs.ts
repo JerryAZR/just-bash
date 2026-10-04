@@ -32,6 +32,7 @@ import {
 import { FsError, isFsErrorCode } from "../fs-error.js";
 import type {
   CpOptions,
+  CreateExclusiveOptions,
   DirentEntry,
   FsStat,
   IFileSystem,
@@ -43,6 +44,7 @@ import type {
 import {
   DEFAULT_FILE_MODE,
   dirname,
+  joinPath,
   MAX_SYMLINK_DEPTH,
   resolveSymlinkTarget,
   resolvePath as resolveVPath,
@@ -1353,6 +1355,116 @@ export class OverlayFs implements IFileSystem {
     // shadows, and resurrects a whiteout at this path with lower-layer
     // whiteouts populated — a plain attach would lose the deletion records.
     this.tree.ensureDirs(normalized, (p) => this.lowerChildren(p));
+  }
+
+  /**
+   * Atomically create a private file or directory that must not already
+   * exist. A name is taken when a live entry shadows it in the upper layer
+   * or when the lower layer holds it without a covering whiteout; a
+   * whiteout means the name is free and is cleared by the create (attach
+   * for a file, resurrection via ensureDirs for a directory), so the new
+   * entry is visible to stat/exists/readdir.
+   *
+   * The final component is never followed: an upper symlink at the name is
+   * a live entry (EEXIST), and the lower-layer probe uses lstat. Symlinks
+   * in the parent ARE resolved, so the entry lands where later lookups —
+   * which resolve — will find it.
+   *
+   * Every await happens before the claim; from the final descend() to the
+   * attach() there is no yield, so two interleaved calls cannot both claim
+   * the name.
+   */
+  async createExclusive(
+    path: string,
+    options: CreateExclusiveOptions,
+  ): Promise<void> {
+    const syscall = options.directory ? "mkdir" : "open";
+    validatePath(path, syscall);
+    this.assertWritable(`${syscall} '${path}'`);
+    const normalized = normalizePath(path);
+
+    if (await this.existsInOverlay(normalized)) {
+      throw new FsError("EEXIST", `file already exists, ${syscall} '${path}'`);
+    }
+
+    // Resolve symlinks in the parent, but never in the final component,
+    // and require the parent to be a directory. Attaching under an
+    // unresolved key would create an entry that later lookups — which do
+    // resolve — could not find, and an unchecked parent would allow a
+    // child beneath a file.
+    const parent = dirname(normalized);
+    let target = normalized;
+    if (parent !== "/") {
+      let resolvedParent: string;
+      try {
+        resolvedParent = await this.realpath(parent);
+      } catch {
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, ${syscall} '${path}'`,
+        );
+      }
+      const parentStat = await this.stat(resolvedParent).catch(() => null);
+      if (!parentStat) {
+        throw new FsError(
+          "ENOENT",
+          `no such file or directory, ${syscall} '${path}'`,
+        );
+      }
+      if (!parentStat.isDirectory) {
+        throw new FsError("ENOTDIR", `not a directory, ${syscall} '${path}'`);
+      }
+      target = joinPath(
+        resolvedParent,
+        normalized.slice(normalized.lastIndexOf("/") + 1),
+      );
+      if (target !== normalized && (await this.existsInOverlay(target))) {
+        throw new FsError(
+          "EEXIST",
+          `file already exists, ${syscall} '${path}'`,
+        );
+      }
+    }
+
+    // Everything from here down is synchronous. The awaits above yield, so
+    // two concurrent calls can both observe absence; claiming the name
+    // without an intervening await is what makes the create exclusive
+    // between them.
+    if (options.directory) {
+      // attach() refuses a directory over any existing node — directory
+      // resurrection after deletion must go through ensureDirs, which
+      // clears the whiteout and repopulates the deleted lower-layer
+      // children as whiteouts so they stay deleted.
+      const existing = this.tree.descend(target);
+      if (existing.kind === "found" && existing.node.type !== "whiteout") {
+        throw new FsError(
+          "EEXIST",
+          `file already exists, ${syscall} '${path}'`,
+        );
+      }
+      const dir = this.tree.ensureDirs(target, (p) => this.lowerChildren(p));
+      // Apply the requested mode at creation rather than via a follow-up
+      // chmod, so the entry never carries the default 0755.
+      dir.mode = options.mode;
+      return;
+    }
+
+    // Materialize the (verified) parent chain as upper shadow directories,
+    // then claim the name. A live node at the target means a concurrent
+    // call won the race.
+    this.ensureParentDirs(target);
+    const result = this.tree.descend(target);
+    if (result.kind === "found" && result.node.type !== "whiteout") {
+      throw new FsError("EEXIST", `file already exists, ${syscall} '${path}'`);
+    }
+    // attach() stamps the node with changedAt like every other mutation,
+    // and a file node replacing a whiteout clears it.
+    this.tree.attach(target, {
+      type: "file",
+      content: new Uint8Array(0),
+      mode: options.mode,
+      mtime: new Date(),
+    });
   }
 
   /**
