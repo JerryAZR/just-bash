@@ -43,6 +43,12 @@ describe("OverlayFs createExclusive", () => {
     const stat = await overlay.stat("/fresh-dir");
     expect(stat.isDirectory).toBe(true);
     expect(stat.mode & 0o777).toBe(0o700);
+
+    const diff = overlay.diff();
+    const write = diff.writes.find((w) => w.path === "/fresh-dir");
+    expect(write?.nodeType).toBe("directory");
+    expect(write?.mode).toBe(0o700);
+    expect(write?.changedAt).toBeGreaterThan(0);
   });
 
   it("rejects a name held by a live upper-layer entry", async () => {

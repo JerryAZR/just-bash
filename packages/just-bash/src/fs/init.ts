@@ -121,14 +121,14 @@ export function initFilesystem(
 
 /**
  * Skip paths a MountableFs routes to a filesystem without sync writes, such
- * as ReadWriteFs. It throws ENOSYS for those.
+ * as ReadWriteFs. It throws FsError with code ENOSYS for those.
  */
 function skipUnsupported(fs: SyncInitFs): SyncInitFs {
   const attempt = (write: () => void) => {
     try {
       write();
     } catch (error) {
-      if (!(error instanceof Error && error.message.startsWith("ENOSYS"))) {
+      if ((error as { code?: unknown })?.code !== "ENOSYS") {
         throw error;
       }
     }

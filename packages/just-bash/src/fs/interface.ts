@@ -103,8 +103,8 @@ export interface MkdirOptions {
 export interface CreateExclusiveOptions {
   /**
    * Permission bits applied at creation time, e.g. 0o600 for a private file
-   * or 0o700 for a private directory. Applied by the creating syscall itself
-   * (subject to umask) so the entry is never briefly visible with the
+   * or 0o700 for a private directory. Applied by the creating operation
+   * itself so the entry is never briefly visible with the
    * backend's default mode.
    */
   mode: number;

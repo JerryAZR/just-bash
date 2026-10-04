@@ -273,14 +273,11 @@ function splitTemplate(
 /**
  * True when `error` reports the given errno.
  *
- * Backends throw either a Node `ErrnoException` carrying `code` or an Error
- * whose message starts with `"<CODE>: "`. The path is interpolated after that
- * prefix, so anchoring at the start keeps a crafted template from
- * impersonating an errno.
+ * Per the IFileSystem ERROR CONTRACT, implementations throw an error with a
+ * string `.code`; consumers read it structurally and never parse prose.
  */
 function isErrno(error: unknown, code: string): boolean {
-  if ((error as NodeJS.ErrnoException)?.code === code) return true;
-  return getErrorMessage(error).startsWith(`${code}:`);
+  return (error as { code?: unknown })?.code === code;
 }
 
 /**
