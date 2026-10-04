@@ -809,7 +809,7 @@ export class MountableFs implements IFileSystem {
     const { fs, relativePath } = this.routePath(path);
     const target = fs as SyncWrites;
     if (!target.mkdirSync) {
-      throw new Error(`ENOSYS: function not implemented, mkdir '${path}'`);
+      throw new FsError("ENOSYS", `function not implemented, mkdir '${path}'`);
     }
     target.mkdirSync(relativePath, options);
   }
@@ -822,7 +822,7 @@ export class MountableFs implements IFileSystem {
     const { fs, relativePath } = this.routePath(path);
     const target = fs as SyncWrites;
     if (!target.writeFileSync) {
-      throw new Error(`ENOSYS: function not implemented, write '${path}'`);
+      throw new FsError("ENOSYS", `function not implemented, write '${path}'`);
     }
     target.writeFileSync(relativePath, content);
   }
