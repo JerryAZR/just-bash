@@ -19,7 +19,10 @@ import { getIfsSeparator } from "../helpers/ifs.js";
 import { escapeRegex } from "../helpers/regex.js";
 import type { InterpreterContext } from "../types.js";
 import { patternToRegex } from "./pattern.js";
-import { applyPatternRemoval } from "./pattern-removal.js";
+import {
+  applyPatternRemoval,
+  buildPatternRemovalRegex,
+} from "./pattern-removal.js";
 import { getArrayElements, getVariable, isVariableSet } from "./variable.js";
 
 /**
@@ -273,28 +276,15 @@ export async function handleArrayPatternWithPrefixSuffix(
   if (arrayOperation?.type === "PatternRemoval") {
     const op = arrayOperation as PatternRemovalOp;
     // Build the regex pattern
-    let regexStr = "";
-    const extglob = ctx.state.shoptOptions.extglob;
-    if (op.pattern) {
-      for (const part of op.pattern.parts) {
-        if (part.type === "Glob") {
-          regexStr += patternToRegex(part.pattern, op.greedy, extglob);
-        } else if (part.type === "Literal") {
-          regexStr += patternToRegex(part.value, op.greedy, extglob);
-        } else if (part.type === "SingleQuoted" || part.type === "Escaped") {
-          regexStr += escapeRegex(part.value);
-        } else if (part.type === "DoubleQuoted") {
-          const expanded = await expandWordPartsAsync(ctx, part.parts);
-          regexStr += escapeRegex(expanded);
-        } else if (part.type === "ParameterExpansion") {
-          const expanded = await expandPart(ctx, part);
-          regexStr += patternToRegex(expanded, op.greedy, extglob);
-        } else {
-          const expanded = await expandPart(ctx, part);
-          regexStr += escapeRegex(expanded);
-        }
-      }
-    }
+    const regexStr = op.pattern
+      ? await buildPatternRemovalRegex(
+          ctx,
+          op.pattern,
+          op.greedy,
+          expandWordPartsAsync,
+          expandPart,
+        )
+      : "";
     // Apply pattern removal to each element
     values = values.map((value) =>
       applyPatternRemoval(ctx, value, regexStr, op.side, op.greedy),

@@ -38,6 +38,7 @@ import type { InterpreterContext } from "../types.js";
 import { patternToRegex } from "./pattern.js";
 import {
   applyPatternRemoval,
+  buildPatternRemovalRegex,
   getVarNamesWithPrefix,
 } from "./pattern-removal.js";
 import { applyPatternReplacementBounded } from "./pattern-replacement.js";
@@ -213,29 +214,15 @@ export async function handlePatternRemoval(
 ): Promise<string> {
   ctx.coverage?.hit("bash:expansion:pattern_removal");
   // Build regex pattern from parts, preserving literal vs glob distinction
-  let regexStr = "";
-  const extglob = ctx.state.shoptOptions.extglob;
-  if (operation.pattern) {
-    for (const part of operation.pattern.parts) {
-      if (part.type === "Glob") {
-        regexStr += patternToRegex(part.pattern, operation.greedy, extglob);
-      } else if (part.type === "Literal") {
-        // Unquoted literal - treat as glob pattern (may contain *, ?, [...])
-        regexStr += patternToRegex(part.value, operation.greedy, extglob);
-      } else if (part.type === "SingleQuoted" || part.type === "Escaped") {
-        regexStr += escapeRegex(part.value);
-      } else if (part.type === "DoubleQuoted") {
-        const expanded = await expandWordPartsAsync(ctx, part.parts);
-        regexStr += escapeRegex(expanded);
-      } else if (part.type === "ParameterExpansion") {
-        const expanded = await expandPart(ctx, part);
-        regexStr += patternToRegex(expanded, operation.greedy, extglob);
-      } else {
-        const expanded = await expandPart(ctx, part);
-        regexStr += escapeRegex(expanded);
-      }
-    }
-  }
+  const regexStr = operation.pattern
+    ? await buildPatternRemovalRegex(
+        ctx,
+        operation.pattern,
+        operation.greedy,
+        expandWordPartsAsync,
+        expandPart,
+      )
+    : "";
 
   return applyPatternRemoval(
     ctx,
