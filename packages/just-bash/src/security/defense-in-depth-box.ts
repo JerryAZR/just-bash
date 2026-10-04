@@ -622,6 +622,10 @@ export class DefenseInDepthBox {
         deactivated = true;
         this.activeExecutionIds.delete(executionId);
         this.contextCache.delete(executionId);
+        // A trusted scope can only be live while its execution is. Releasing it
+        // here keeps a scope that was opened for abandoned work from outliving
+        // the execution and leaking the entry.
+        DefenseInDepthBox.trustedExecutionDepth.delete(executionId);
 
         this.refCount--;
         if (this.refCount === 0) {
