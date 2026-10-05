@@ -1,5 +1,13 @@
 # executor-tools-example
 
+## 1.0.18
+
+### Patch Changes
+
+- Updated dependencies [[`f9d4cac`](https://github.com/JerryAZR/just-bash/commit/f9d4cacd34fc58d282a873e520f966f2c9131121), [`66565ae`](https://github.com/JerryAZR/just-bash/commit/66565aeb07a390d1f5cc9b0318e35a62935905e6), [`ac61171`](https://github.com/JerryAZR/just-bash/commit/ac61171edafd5e1d95394adc9cae484ea2893a65), [`c02090e`](https://github.com/JerryAZR/just-bash/commit/c02090e3c3ca0361cfe36bcb8a3ae3d7b99566bb), [`7c6f212`](https://github.com/JerryAZR/just-bash/commit/7c6f21284738553233328a611aa30a0cba9e16d6), [`205648d`](https://github.com/JerryAZR/just-bash/commit/205648ddc6ee7e47d62aa1a55501b91bb53222e7), [`4c78060`](https://github.com/JerryAZR/just-bash/commit/4c78060dda6e48550495428ba76ab0c0e64aed52), [`b09632e`](https://github.com/JerryAZR/just-bash/commit/b09632ea49bfb40ab18fd91bfb0f3ce07deeda18), [`2a8626d`](https://github.com/JerryAZR/just-bash/commit/2a8626dac33823d37218f3dcde2a6ad9a415a63c), [`05f267c`](https://github.com/JerryAZR/just-bash/commit/05f267cc7fc363e8eb0c57cfac3a6e82ef2bffd4), [`03c1bf3`](https://github.com/JerryAZR/just-bash/commit/03c1bf3df3466551404c232c22dd1737afcb788e), [`e92b595`](https://github.com/JerryAZR/just-bash/commit/e92b5955cbfc68955e421809c44e9a94607e0ac2), [`b3824fc`](https://github.com/JerryAZR/just-bash/commit/b3824fc4887fca1f2e83f8def3043f8fcd47cab1), [`4a3e413`](https://github.com/JerryAZR/just-bash/commit/4a3e413621d38649501d4108a4ba94cad0dc4d5e), [`3931199`](https://github.com/JerryAZR/just-bash/commit/39311993b0d8de7653d6920360254fd4c40e5ba6), [`4a96d1a`](https://github.com/JerryAZR/just-bash/commit/4a96d1a96c1fecdfc83a9e88b0b3657a530d0782), [`8966372`](https://github.com/JerryAZR/just-bash/commit/896637208911362848bf0e09bd52769ff5252af0), [`5f0d4f6`](https://github.com/JerryAZR/just-bash/commit/5f0d4f6b7a2aaa41d8e44efc541958a31e648778), [`d13cf6f`](https://github.com/JerryAZR/just-bash/commit/d13cf6f30bebc5705875d2877ea859f7ab9be936), [`8c18f71`](https://github.com/JerryAZR/just-bash/commit/8c18f71fe869369fce6a2207714df7ef1822fd6d)]:
+  - @jerryan/just-bash@3.11.0
+  - @just-bash/executor@11.0.0
+
 ## 1.0.17
 
 ### Patch Changes
