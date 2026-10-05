@@ -77,7 +77,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 export interface SecureFetchOptions {
   method?: string;
   headers?: Headers | Record<string, string>;
-  body?: string;
+  body?: string | Uint8Array<ArrayBuffer>;
   followRedirects?: boolean;
   /** Override timeout for this request (capped at global timeout) */
   timeoutMs?: number;

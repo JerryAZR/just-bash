@@ -109,6 +109,62 @@ describe("createVfsTemplate", () => {
     ]);
   });
 
+  it("createExclusive lands in the fork's private upper layer", async () => {
+    const tpl = makeTemplate();
+    const a = tpl.fork();
+    const b = tpl.fork();
+
+    await a.createExclusive("/project/tmpfile.txt", { mode: 0o600 });
+
+    // Private to fork a's upper layer: invisible to b and to disk, with
+    // the mode applied at creation.
+    expect(await a.exists("/project/tmpfile.txt")).toBe(true);
+    expect((await a.stat("/project/tmpfile.txt")).mode & 0o777).toBe(0o600);
+    expect(await b.exists("/project/tmpfile.txt")).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, "tmpfile.txt"))).toBe(false);
+
+    // The name is now taken in a, still free in b.
+    await expect(
+      a.createExclusive("/project/tmpfile.txt", { mode: 0o600 }),
+    ).rejects.toThrow("EEXIST");
+    await b.createExclusive("/project/tmpfile.txt", { mode: 0o600 });
+
+    // And it merges as an ordinary write.
+    const merged = (await tpl.merge([a])).diff({ space: "vfs" });
+    expect(
+      merged.writes.some(
+        (w) => w.path === "/project/tmpfile.txt" && w.mode === 0o600,
+      ),
+    ).toBe(true);
+  });
+
+  it("drives mktemp end to end on a fork filesystem", async () => {
+    const tpl = makeTemplate();
+    const bash = new Bash({ fs: tpl.fork(), cwd: "/project" });
+    const result = await bash.exec(
+      'f=$(mktemp -p /project buildXXXX) && test -f "$f" && stat -c \'%a\' "$f"',
+    );
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("600\n");
+  });
+
+  it("read-only template reports EROFS for exclusive creates", async () => {
+    const tpl = createVfsTemplate({
+      mounts: [{ at: "/project", root: projectRoot }],
+      readOnly: true,
+    });
+    const fork = tpl.fork();
+    await expect(
+      fork.createExclusive("/project/nope.txt", { mode: 0o600 }),
+    ).rejects.toThrow("EROFS");
+
+    const bash = new Bash({ fs: fork, cwd: "/project" });
+    const result = await bash.exec("mktemp -p /project xXXXXX");
+    expect(result.stdout).toBe("");
+    expect(result.exitCode).toBe(1);
+  });
+
   it("apply rejects entries outside every registered root", () => {
     const tpl = makeTemplate();
     expect(() =>

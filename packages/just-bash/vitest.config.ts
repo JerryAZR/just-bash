@@ -21,8 +21,6 @@ export default defineConfig({
     pool: "threads",
     isolate: false,
     setupFiles: [resolve(__dirname, "src/vitest-setup.ts")],
-    // Tests that spawn workers (sqlite3, python) need process-level isolation
-    // because defense-in-depth patches globalThis which is shared across threads.
     // Tests that need process-level isolation because defense-in-depth
     // patches globalThis (shared across threads with isolate: false).
     // Note: mock-based tests (queue-timeout-exploit) prefer threads,
@@ -35,6 +33,7 @@ export default defineConfig({
       ["forks", "**/python3.advanced.test.ts"],
       ["forks", "**/python3.env.test.ts"],
       ["forks", "**/python3.files.test.ts"],
+      ["forks", "**/python3.finalization.test.ts"],
       ["forks", "**/python3.http.test.ts"],
       ["forks", "**/python3.oop.test.ts"],
       ["forks", "**/python3.optin.test.ts"],

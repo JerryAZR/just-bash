@@ -622,6 +622,10 @@ export class DefenseInDepthBox {
         deactivated = true;
         this.activeExecutionIds.delete(executionId);
         this.contextCache.delete(executionId);
+        // A trusted scope can only be live while its execution is. Releasing it
+        // here keeps a scope that was opened for abandoned work from outliving
+        // the execution and leaking the entry.
+        DefenseInDepthBox.trustedExecutionDepth.delete(executionId);
 
         this.refCount--;
         if (this.refCount === 0) {
@@ -757,7 +761,9 @@ export class DefenseInDepthBox {
     const current = executionContext.getStore();
     if (!current) return fn();
     const { executionId } = current;
-    return executionContext.run(
+    // Return the value, not the promise: adopting it would go through the
+    // patched Promise.prototype.then, which is blocked after deactivation.
+    return await executionContext.run(
       { ...current, trusted: true, forceUntrusted: false },
       async () => {
         DefenseInDepthBox.enterTrustedScope(executionId);
