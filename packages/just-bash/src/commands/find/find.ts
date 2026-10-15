@@ -4,7 +4,10 @@ import type { ExecutionScope } from "../../execution-scope.js";
 import type { DirentEntry } from "../../fs/interface.js";
 import { FileTraversalBudget } from "../../fs/traversal.js";
 import { shellJoinArgs } from "../../helpers/shell-quote.js";
-import { ExecutionLimitError } from "../../interpreter/errors.js";
+import {
+  ExecutionAbortedError,
+  ExecutionLimitError,
+} from "../../interpreter/errors.js";
 import type {
   ExecResult,
   RuntimeCommand,
@@ -716,7 +719,12 @@ export const findCommand: RuntimeCommand = {
             const batch = workQueue.slice(workCursor, batchEnd);
             workCursor = batchEnd;
             const nodes = await Promise.all(
-              batch.map((q) => processNode(q.item)),
+              batch.map((q) =>
+                processNode(q.item).catch((err) => {
+                  if (err instanceof ExecutionAbortedError) return null;
+                  throw err;
+                }),
+              ),
             );
             traceCounters.batchCount++;
             traceCounters.batchTime += Date.now() - batchStart;
@@ -820,8 +828,13 @@ export const findCommand: RuntimeCommand = {
             workCursor = batchEnd;
             const processed: Array<NodeWithOrder | null> = await Promise.all(
               batch.map(async ({ item, orderIndex }) => {
-                const node = await processNode(item);
-                return node ? { node, orderIndex } : null;
+                try {
+                  const node = await processNode(item);
+                  return node ? { node, orderIndex } : null;
+                } catch (err) {
+                  if (err instanceof ExecutionAbortedError) return null;
+                  throw err;
+                }
               }),
             );
             traceCounters.batchCount++;
