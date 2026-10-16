@@ -22,30 +22,34 @@ describe("find abort safety", () => {
     expect(result.exitCode).toBe(124);
   });
 
-  it("abort mid-traversal returns 124 without throwing", { timeout: 30000 }, async () => {
-    // Real filesystem ensures traversal takes long enough for abort to fire
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "find-abort-test-"));
-    try {
-      for (let d = 0; d < 100; d++) {
-        const dir = path.join(tmp, `dir${d}`);
-        fs.mkdirSync(dir, { recursive: true });
-        for (let f = 0; f < 50; f++) {
-          fs.writeFileSync(path.join(dir, `file${f}.txt`), "content");
+  it(
+    "abort mid-traversal returns 124 without throwing",
+    { timeout: 30000 },
+    async () => {
+      // Real filesystem ensures traversal takes long enough for abort to fire
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "find-abort-test-"));
+      try {
+        for (let d = 0; d < 100; d++) {
+          const dir = path.join(tmp, `dir${d}`);
+          fs.mkdirSync(dir, { recursive: true });
+          for (let f = 0; f < 50; f++) {
+            fs.writeFileSync(path.join(dir, `file${f}.txt`), "content");
+          }
         }
+
+        const overlay = new OverlayFs({ root: tmp });
+        const env = new Bash({ fs: overlay });
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 5);
+
+        // Must not throw — abort should be caught and returned as exit 124
+        const result = await env.exec("find / -type f", {
+          signal: controller.signal,
+        });
+        expect([0, 124]).toContain(result.exitCode);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
       }
-
-      const overlay = new OverlayFs({ root: tmp });
-      const env = new Bash({ fs: overlay });
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 5);
-
-      // Must not throw — abort should be caught and returned as exit 124
-      const result = await env.exec("find / -type f", {
-        signal: controller.signal,
-      });
-      expect([0, 124]).toContain(result.exitCode);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });
