@@ -1,5 +1,21 @@
 # just-bash
 
+## 3.11.1
+
+### Patch Changes
+
+- [`4cb67f9`](https://github.com/JerryAZR/just-bash/commit/4cb67f99d9b4f3655b0cd68a1c2cfcc674bb394d) Thanks [@JerryAZR](https://github.com/JerryAZR)! - fix: find command no longer crashes host process on abort
+
+  When an AbortSignal fires during `find`'s parallel batch traversal,
+  all concurrent `processNode` promises throw `ExecutionAbortedError`
+  from the traversal budget checkpoint. `Promise.all` only catches the
+  first rejection — the rest become unhandled rejections that crash the
+  host process (e.g. pi) with `uncaughtException`.
+
+  Fix: catch `ExecutionAbortedError` inside the `Promise.all` map
+  callbacks and return null. The abort is still detected on the next
+  sequential checkpoint and properly propagated as exit code 124.
+
 ## 3.11.0
 
 ### Minor Changes
